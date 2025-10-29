@@ -9,6 +9,7 @@ import {
   Dimensions,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,12 +19,15 @@ import ScreenWrapper from '../../components/ScreenWrapper';
 import ResponsiveLayout from '../../components/ResponsiveLayout';
 import { APP_CONFIG, FONTS } from '../../constants';
 import { useBooking } from '../../context/BookingContext';
+import AppointmentService from '../../services/appointmentService';
+import { useAuth } from '../../hooks/redux';
 
 const { width } = Dimensions.get('window');
 
 export default function BranchSelectionScreen() {
   const navigation = useNavigation();
   const { state, setBranch, setLoading, setError } = useBooking();
+  const { user } = useAuth();
   const [selectedBranch, setSelectedBranch] = useState<string | null>(state.bookingData.branchId || null);
   const [branches, setBranches] = useState<any[]>([]);
   const [loading, setLoadingLocal] = useState(true);
@@ -76,15 +80,23 @@ export default function BranchSelectionScreen() {
         const data = doc.data();
         activeBranches.push({
           id: doc.id,
-          branchId: doc.id,
-          name: data['name'],
-          address: data['address'],
-          city: data['city'],
-          phone: data['contactNumber'],
-          email: data['email'],
+          branchId: doc.id, // Using branchId as per collection schema
+          name: data['name'] || 'Unknown Branch',
+          address: data['address'] || '',
+          city: data['city'] || '',
+          contactNumber: data['contactNumber'] || '',
+          email: data['email'] || '',
+          capacity: data['capacity'] || 0,
+          managerId: data['managerId'] || '',
+          branchAdminId: data['branchAdminId'] || null,
+          amenities: data['amenities'] || [],
+          holidays: data['holidays'] || [],
+          services: data['services'] || [],
+          operatingHours: data['operatingHours'] || {},
           hours: getReadableHours(data['operatingHours']),
-          operatingHours: data['operatingHours'],
-          isActive: data['isActive'],
+          isActive: data['isActive'] || false,
+          createdAt: data['createdAt'] || null,
+          updatedAt: data['updatedAt'] || null,
         });
       });
 
@@ -108,6 +120,12 @@ export default function BranchSelectionScreen() {
   const handleNext = () => {
     if (selectedBranch) {
       const selectedBranchData = branches.find(branch => branch.branchId === selectedBranch);
+      console.log('🔍 Selected branch data:', {
+        selectedBranch,
+        selectedBranchData,
+        allBranches: branches.map(b => ({ id: b.id, branchId: b.branchId, name: b.name }))
+      });
+      
       if (selectedBranchData) {
         // Save branch data to booking context
         setBranch({
@@ -117,8 +135,16 @@ export default function BranchSelectionScreen() {
           branchCity: selectedBranchData.city,
         });
         
+        console.log('✅ Branch data saved to context:', {
+          branchId: selectedBranchData.branchId,
+          branchName: selectedBranchData.name
+        });
+        
         // Navigate to next step
         (navigation as any).navigate('DateTimeSelection');
+      } else {
+        console.error('❌ Selected branch data not found for ID:', selectedBranch);
+        Alert.alert('Error', 'Selected branch data not found. Please try again.');
       }
     } else {
       Alert.alert('Selection Required', 'Please select a branch to continue.');
@@ -170,7 +196,12 @@ export default function BranchSelectionScreen() {
   // ✅ Mobile layout
   return (
     <ScreenWrapper title="Book Appointment">
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView 
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <ProgressIndicator />
 
         <View style={styles.section}>
@@ -201,6 +232,7 @@ export default function BranchSelectionScreen() {
           disabled={!selectedBranch}
         />
       </ScrollView>
+      </KeyboardAvoidingView>
     </ScreenWrapper>
   );
 }
@@ -237,7 +269,7 @@ const BranchCard = ({ branch, selected, onSelect }: any) => (
     <View style={styles.branchDetails}>
       <View style={styles.branchDetailItem}>
         <Ionicons name="call" size={16} color="#666" />
-        <Text style={styles.branchDetailText}>{branch.phone}</Text>
+        <Text style={styles.branchDetailText}>{branch.contactNumber}</Text>
       </View>
       <View style={styles.branchDetailItem}>
         <Ionicons name="time" size={16} color="#666" />

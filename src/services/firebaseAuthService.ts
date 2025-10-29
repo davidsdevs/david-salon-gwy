@@ -71,6 +71,11 @@ export class FirebaseAuthService {
         throw new Error('Access denied. Only clients and stylists can use the mobile app.');
       }
 
+      // Security: must be active
+      if (userProfile.isActive === false) {
+        throw new Error('Your account is not active. Please contact support.');
+      }
+
       // Get Firebase ID token
       const token = await firebaseUser.getIdToken();
       
@@ -120,9 +125,9 @@ export class FirebaseAuthService {
         firstName: userData.firstName,
         lastName: userData.lastName,
         phone: userData.phone || '',
-        profileImage: undefined,
         userType: userData.userType,
         isActive: true,
+        roles: [userData.userType], // Add roles array with user type
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         // Legacy properties
@@ -142,11 +147,16 @@ export class FirebaseAuthService {
           totalSpent: 0,
           loyaltyPoints: 0
         };
-        await setDoc(doc(db, COLLECTIONS.CLIENTS, firebaseUser.uid), {
-          ...clientData,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+        // Clean data to remove undefined values
+        const cleanClientData = Object.fromEntries(
+          Object.entries({
+            ...clientData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }).filter(([_, value]) => value !== undefined)
+        );
+        
+        await setDoc(doc(db, COLLECTIONS.CLIENTS, firebaseUser.uid), cleanClientData);
       } else if (userData.userType === 'stylist') {
         const stylistData: Stylist = {
           ...userProfile,
@@ -169,19 +179,28 @@ export class FirebaseAuthService {
           },
           services: []
         };
-        await setDoc(doc(db, COLLECTIONS.STYLISTS, firebaseUser.uid), {
-          ...stylistData,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
+        // Clean data to remove undefined values
+        const cleanStylistData = Object.fromEntries(
+          Object.entries({
+            ...stylistData,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }).filter(([_, value]) => value !== undefined)
+        );
+        
+        await setDoc(doc(db, COLLECTIONS.STYLISTS, firebaseUser.uid), cleanStylistData);
       }
 
       // Also store in general users collection
-      await setDoc(doc(db, COLLECTIONS.USERS, firebaseUser.uid), {
-        ...userProfile,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
+      const cleanUserProfile = Object.fromEntries(
+        Object.entries({
+          ...userProfile,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }).filter(([_, value]) => value !== undefined)
+      );
+      
+      await setDoc(doc(db, COLLECTIONS.USERS, firebaseUser.uid), cleanUserProfile);
 
       // Get Firebase ID token
       const token = await firebaseUser.getIdToken();
@@ -305,17 +324,22 @@ export class FirebaseAuthService {
       email: converted.email 
     });
     
-    // Handle roles array - if user has roles array, use it
+    // Handle roles array - ensure it's always present
     if (converted.roles && Array.isArray(converted.roles)) {
       console.log('🔄 User has roles array:', converted.roles);
       // Keep the roles array as is
-    } else if (converted.role && !converted.userType) {
-      console.log('🔄 Mapping role to userType:', converted.role, '→', converted.role);
-      converted.userType = converted.role;
-    } else if (converted.role && converted.userType && converted.role !== converted.userType) {
-      // If both exist but are different, prioritize role field
-      console.log('🔄 Role and userType differ, prioritizing role:', converted.role, 'over', converted.userType);
-      converted.userType = converted.role;
+    } else {
+      // If no roles array, create one based on userType or role
+      const userType = converted.userType || converted.role;
+      if (userType) {
+        converted.roles = [userType];
+        console.log('🔄 Created roles array from userType/role:', userType, '→', converted.roles);
+      } else {
+        // Default to client if no userType or role found
+        converted.roles = ['client'];
+        converted.userType = 'client';
+        console.log('🔄 Defaulted to client role');
+      }
     }
     
     // Note: We don't default invalid userTypes to client here
@@ -440,7 +464,14 @@ export class FirebaseAuthService {
    * Get user-friendly error message
    */
   private static getErrorMessage(error: any): string {
-    switch (error.code) {
+    // Check if error exists and has a code property
+    if (!error || typeof error !== 'object') {
+      return 'An unexpected error occurred. Please try again.';
+    }
+
+    const errorCode = error.code || '';
+    
+    switch (errorCode) {
       case 'auth/user-not-found':
         return 'No account found with this email address';
       case 'auth/wrong-password':

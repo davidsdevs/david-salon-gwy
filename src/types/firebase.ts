@@ -204,16 +204,25 @@ export interface FirestorePortfolioItem extends FirestoreDocument {
 }
 
 export interface FirestoreNotification extends FirestoreDocument {
-  userId: string;
+  userId?: string; // Keep for backward compatibility
   title: string;
   message: string;
-  type: 'info' | 'success' | 'warning' | 'error' | 'appointment' | 'promotion';
+  type: 'info' | 'success' | 'warning' | 'error' | 'appointment' | 'promotion' | 'appointment_confirmed' | 'appointment_created';
   isRead: boolean;
   data?: Record<string, any>;
   scheduledFor?: FirebaseTimestamp;
   readAt?: FirebaseTimestamp;
   actionUrl?: string;
   actionText?: string;
+  // Appointment-specific fields
+  appointmentId?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
+  clientName?: string;
+  stylistName?: string;
+  branchName?: string;
+  recipientRole?: string;
+  recipientId?: string;
 }
 
 export interface FirestoreAnalytics extends FirestoreDocument {

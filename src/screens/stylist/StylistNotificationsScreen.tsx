@@ -60,7 +60,7 @@ export default function StylistNotificationsScreen() {
         const notificationsRef = collection(db, COLLECTIONS.NOTIFICATIONS);
         const q = query(
           notificationsRef,
-          where('userId', '==', user.id),
+          where('recipientId', '==', user.id),
           orderBy('createdAt', 'desc')
         );
 

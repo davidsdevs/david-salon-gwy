@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { COLLECTIONS } from '../config/firebase';
+import NotificationService from './notificationService';
 
 // Types
 export interface Branch {
@@ -103,14 +104,14 @@ class MobileAppointmentService {
       const branches: Branch[] = [];
       
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
+        const data: any = doc.data();
         branches.push({
           id: doc.id,
-          name: data.name || 'Unknown Branch',
-          address: data.address || '',
-          phone: data.phone || '',
-          hours: data.hours || 'Mon-Sat: 9:00 AM - 8:00 PM',
-          isActive: data.isActive !== false,
+          name: data['name'] || data.name || 'Unknown Branch',
+          address: data['address'] || data.address || '',
+          phone: data['phone'] || data.phone || '',
+          hours: data['hours'] || data.hours || 'Mon-Sat: 9:00 AM - 8:00 PM',
+          isActive: (data['isActive'] ?? data.isActive) !== false,
         });
       });
       
@@ -157,27 +158,29 @@ class MobileAppointmentService {
       const branchServicesSnapshot = await getDocs(branchServicesQuery);
       const branchServices: Service[] = [];
       
-      branchServicesSnapshot.forEach((doc) => {
-        const data = doc.data();
-        console.log(`🔍 COMPLETE RAW DATA for ${data.name}:`, data);
-        if (!data.archived) { // Only active services
-          console.log(`🔍 Raw database data for ${data.name}:`, {
-            isChemical: data.isChemical,
-            isChemicalType: typeof data.isChemical,
-            isChemica1: data.isChemica1,
+  branchServicesSnapshot.forEach((doc) => {
+  const data: any = doc.data();
+        console.log(`🔍 COMPLETE RAW DATA for ${data['name'] || data.name}:`, data);
+        if (!data['archived'] && !data.archived) { // Only active services
+          console.log(`🔍 Raw database data for ${data['name'] || data.name}:`, {
+            isChemical: data['isChemical'] || data.isChemical,
+            isChemicalType: typeof (data['isChemical'] || data.isChemical),
+            isChemica1: data['isChemica1'] || data.isChemica1,
             allFields: Object.keys(data)
           });
           
           branchServices.push({
             id: doc.id,
-            name: data.name || 'Unknown Service',
-            category: data.category || 'General',
-            duration: data.duration || 30,
-            price: data.price || 0,
-            description: data.description || '',
-            isActive: data.isActive !== false,
-            isChemical: data.isChemical || data.isChemica1 || false,
-            branchId: data.branchId,
+            name: data['name'] || data.name || 'Unknown Service',
+            category: data['category'] || data.category || 'General',
+            duration: data['duration'] || data.duration || 30,
+            price: data['price'] || data.price || 0,
+            prices: data['prices'] || data.prices || [],
+            branches: data['branches'] || data.branches || [],
+            description: data['description'] || data.description || '',
+            isActive: (data['isActive'] ?? data.isActive) !== false,
+            isChemical: data['isChemical'] || data.isChemica1 || false,
+            branchId: data['branchId'] || data.branchId,
           });
         }
       });
@@ -193,7 +196,7 @@ class MobileAppointmentService {
         const globalServices: Service[] = [];
         
         globalServicesSnapshot.forEach((doc) => {
-          const data = doc.data();
+          const data: any = doc.data();
           if (!data.archived) { // Only active services
             console.log(`🔍 Raw GLOBAL database data for ${data.name}:`, {
               isChemical: data.isChemical,
@@ -232,8 +235,10 @@ class MobileAppointmentService {
   async getAvailableServicesByBranch(branchId: string): Promise<Service[]> {
     try {
       console.log('🔄 Fetching available services for branch:', branchId);
+      console.log('🔍 Branch ID type:', typeof branchId, 'Value:', branchId);
       
-      // Get all services and filter by branch availability
+      // Get all active services - since users with branchId: null can book anywhere,
+      // we show ALL active services regardless of branch restrictions
       const servicesRef = collection(db, COLLECTIONS.SERVICES);
       const q = query(servicesRef, where('isActive', '==', true));
       const querySnapshot = await getDocs(q);
@@ -241,31 +246,29 @@ class MobileAppointmentService {
       const availableServices: Service[] = [];
       
       querySnapshot.forEach(doc => {
-        const data = doc.data();
+        const data: any = doc.data();
         console.log('🔍 Processing service:', {
           docId: doc.id,
           serviceName: data.name,
           branches: data.branches,
-          targetBranchId: branchId,
-          isAvailableAtBranch: data.branches && data.branches.includes(branchId)
+          targetBranchId: branchId
         });
         
-        // Check if this service is available at the selected branch
-        if (data.branches && data.branches.includes(branchId)) {
-          const service = {
-            id: doc.id,
-            name: data.name,
-            category: data.category,
-            duration: data.duration,
-            price: data.prices && data.prices.length > 0 ? data.prices[0] : 0, // Use first price
-            description: data.description,
-            isActive: data.isActive,
-            isChemical: data.isChemical || data.isChemica1 || false,
-            branchId: branchId
-          };
-          console.log('✅ Adding service:', service);
-          availableServices.push(service);
-        }
+        // Since users can book at any branch, show all active services
+        // The branch-specific pricing will be handled by the pricing service
+        const service = {
+          id: doc.id,
+          name: data.name,
+          category: data.category,
+          duration: data.duration,
+          price: data.prices && data.prices.length > 0 ? data.prices[0] : 0, // Use first price
+          description: data.description,
+          isActive: data.isActive,
+          isChemical: data.isChemical || data.isChemica1 || false,
+          branchId: branchId // Set the selected branch ID for pricing calculations
+        };
+        console.log('✅ Adding service:', service);
+        availableServices.push(service);
       });
       
       console.log('✅ Found available services for branch:', availableServices.length);
@@ -300,8 +303,8 @@ class MobileAppointmentService {
       const querySnapshot = await getDocs(q);
       const availableStylists: Stylist[] = [];
       
-      querySnapshot.forEach(doc => {
-        const data = doc.data();
+  querySnapshot.forEach(doc => {
+  const data: any = doc.data();
         
         console.log('🔍 Processing stylist data:', {
           id: doc.id,
@@ -400,7 +403,7 @@ class MobileAppointmentService {
       let invalidCount = 0;
       
       querySnapshot.forEach(doc => {
-        const data = doc.data();
+        const data: any = doc.data();
         console.log('  - Stylist:', `${data.firstName} ${data.lastName}`, 'Service IDs:', data.service_id, 'Type:', typeof data.service_id, 'IsArray:', Array.isArray(data.service_id));
         
         if (Array.isArray(data.service_id)) {
@@ -587,7 +590,40 @@ class MobileAppointmentService {
   // Create appointment
   async createAppointment(appointmentData: any): Promise<string> {
     try {
-      console.log('🔄 Creating appointment:', appointmentData);
+      console.log('🔄 Creating appointment with data:', appointmentData);
+      
+      // Validate required fields
+      const requiredFields = [
+        'appointmentDate',
+        'appointmentTime', 
+        'branchId',
+        'clientEmail',
+        'clientId',
+        'clientName',
+        'serviceStylistPairs',
+        'status',
+        'totalPrice'
+      ];
+      
+      const missingFields = requiredFields.filter(field => 
+        !appointmentData[field] || 
+        (Array.isArray(appointmentData[field]) && appointmentData[field].length === 0)
+      );
+      
+      if (missingFields.length > 0) {
+        throw new Error(`Missing required fields: ${missingFields.join(', ')}`);
+      }
+      
+      // Validate serviceStylistPairs structure
+      if (!Array.isArray(appointmentData.serviceStylistPairs)) {
+        throw new Error('serviceStylistPairs must be an array');
+      }
+      
+      for (const pair of appointmentData.serviceStylistPairs) {
+        if (!pair.serviceId || !pair.serviceName || !pair.stylistId || !pair.stylistName) {
+          throw new Error('Each serviceStylistPair must have serviceId, serviceName, stylistId, and stylistName');
+        }
+      }
       
       // Remove undefined fields (Firestore rejects undefined)
       const removeUndefinedFields = (obj: any) => Object.keys(obj).reduce((acc, key) => {
@@ -602,14 +638,62 @@ class MobileAppointmentService {
         updatedAt: serverTimestamp()
       });
       
+      console.log('📋 Final appointment data to save:', appointment);
+      
       const appointmentsRef = collection(db, COLLECTIONS.APPOINTMENTS);
       const docRef = await addDoc(appointmentsRef, appointment);
       
-      console.log('✅ Appointment created with ID:', docRef.id);
+      console.log('✅ Appointment created successfully with ID:', docRef.id);
+      
+      // Create notifications for stylist and client
+      try {
+        console.log('🔔 Creating notifications for appointment booking...');
+        
+        // Get the first stylist from serviceStylistPairs for notification
+        const firstStylist = appointmentData.serviceStylistPairs[0];
+        if (firstStylist && firstStylist.stylistId) {
+          // Create notification for stylist
+          await NotificationService.createStylistAppointmentNotification(
+            docRef.id,
+            appointmentData.appointmentDate,
+            appointmentData.appointmentTime,
+            appointmentData.clientName,
+            firstStylist.stylistName,
+            firstStylist.stylistId,
+            appointmentData.branchName || 'David\'s Salon'
+          );
+          
+          // Create notification for client
+          await NotificationService.createClientAppointmentNotification(
+            docRef.id,
+            appointmentData.appointmentDate,
+            appointmentData.appointmentTime,
+            appointmentData.clientName,
+            appointmentData.clientId,
+            firstStylist.stylistName,
+            appointmentData.branchName || 'David\'s Salon'
+          );
+          
+          console.log('✅ Notifications created successfully');
+        } else {
+          console.warn('⚠️ No stylist found for notification creation');
+        }
+      } catch (notificationError) {
+        console.error('❌ Error creating notifications (appointment still created):', notificationError);
+        // Don't throw error here - appointment was created successfully
+      }
+      
       return docRef.id;
     } catch (error) {
       console.error('❌ Error creating appointment:', error);
-      throw new Error('Failed to create appointment');
+      console.error('❌ Appointment data that failed:', appointmentData);
+      
+      // Re-throw with more specific error message
+      if (error instanceof Error) {
+        throw new Error(`Failed to create appointment: ${error.message}`);
+      } else {
+        throw new Error('Failed to create appointment: Unknown error');
+      }
     }
   }
 

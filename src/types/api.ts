@@ -66,7 +66,7 @@ export interface Stylist extends User {
   totalClients: number;
   totalEarnings: number;
   isAvailable: boolean;
-  branchId?: string;
+  branchId: string;
   workingHours: {
     [key: string]: {
       start: string;
@@ -86,18 +86,34 @@ export interface Appointment {
   serviceId: string;
   branchId: string;
   date: string; // ISO date
+  time?: string; // HH:mm format (for compatibility)
   startTime: string; // HH:mm format
   endTime: string; // HH:mm format
   duration: number; // minutes
-  status: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+  status: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show' | 'scheduled' | 'pending_reschedule';
   notes?: string;
   clientNotes?: string;
   stylistNotes?: string;
   price: number;
   discount?: number;
   finalPrice: number;
+  totalPrice?: number;
   paymentStatus: 'pending' | 'paid' | 'refunded';
   paymentMethod?: 'cash' | 'card' | 'online';
+  // Additional fields for compatibility
+  appointmentDate?: string;
+  appointmentTime?: string;
+  serviceStylistPairs?: Array<{
+    serviceId: string;
+    stylistId: string;
+    serviceName?: string;
+    stylistName?: string;
+  }>;
+  history?: Array<{
+    status: string;
+    timestamp: string;
+    notes?: string;
+  }>;
   createdAt: string;
   updatedAt: string;
   // Populated fields
@@ -115,6 +131,8 @@ export interface Service {
   category: ServiceCategory;
   duration: number; // minutes
   price: number;
+  prices?: number[]; // Array of prices for different branches
+  branches?: string[]; // Array of branch IDs corresponding to prices array
   isActive: boolean;
   requiresStylist: boolean;
   maxConcurrent: number;

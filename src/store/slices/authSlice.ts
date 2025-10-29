@@ -196,6 +196,12 @@ export const loadStoredAuth = createAsyncThunk(
             await AsyncStorage.multiRemove(['authToken', 'refreshToken', 'user']);
             return null;
           }
+          // Enforce active accounts only
+          if (userProfile.isActive === false) {
+            console.log('🔄 loadStoredAuth: User not active, clearing auth');
+            await AsyncStorage.multiRemove(['authToken', 'refreshToken', 'user']);
+            return null;
+          }
           
           const token = await currentUser.getIdToken();
           console.log('🔄 loadStoredAuth: Returning fresh user data');
@@ -247,6 +253,12 @@ export const loadStoredAuth = createAsyncThunk(
         
         if (!hasValidRole) {
           console.log('🔄 loadStoredAuth: Invalid stored user type, clearing auth:', { userType, roles: userRoles });
+          await AsyncStorage.multiRemove(['authToken', 'refreshToken', 'user']);
+          return null;
+        }
+        // Enforce active accounts only for stored data as well
+        if (user.isActive === false) {
+          console.log('🔄 loadStoredAuth: Stored user not active, clearing auth');
           await AsyncStorage.multiRemove(['authToken', 'refreshToken', 'user']);
           return null;
         }

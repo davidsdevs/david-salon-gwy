@@ -16,10 +16,12 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import ResponsiveLayout from '../../components/ResponsiveLayout';
-import { APP_CONFIG, FONTS } from '../../constants';
+import { APP_CONFIG, FONTS, TYPOGRAPHY_STYLES } from '../../constants';
 import MobileAppointmentService, { AppointmentData } from '../../services/mobileAppointmentService';
+import AppointmentService from '../../services/appointmentService';
 import { useAuth } from '../../hooks/redux';
 import { useBooking } from '../../context/BookingContext';
+import { useServicePricing } from '../../hooks/useServicePricing';
 
 const { width } = Dimensions.get('window');
 
@@ -27,6 +29,7 @@ export default function BookingSummaryScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
   const { state, resetBooking } = useBooking();
+  const { servicePricing, calculateAppointmentTotal } = useServicePricing(state.bookingData.branchId || undefined);
   
   const [isCreating, setIsCreating] = useState(false);
   const [notes, setNotes] = useState(state.bookingData.notes || '');
@@ -82,10 +85,26 @@ export default function BookingSummaryScreen() {
   };
 
   const getTotalPrice = () => {
-    // Use totalPrice if available (for multiple services), otherwise fall back to servicePrice
+    // Calculate total from individual services if available
+    if (state.bookingData.selectedServices && state.bookingData.selectedServices.length > 0) {
+      let total = 0;
+      console.log('💰 Calculating total price from services:');
+      state.bookingData.selectedServices.forEach(service => {
+        // Use servicePricing if available, otherwise fall back to service.price
+        const servicePrice = servicePricing[service.id] || service.price || 0;
+        const numericPrice = typeof servicePrice === 'string' ? parseFloat(servicePrice) || 0 : servicePrice;
+        total += numericPrice;
+        console.log(`  - ${service.name}: ₱${numericPrice} (from ${servicePricing[service.id] ? 'servicePricing' : 'service.price'})`);
+      });
+      console.log(`💰 Total calculated: ₱${total}`);
+      return total;
+    }
+    
+    // Fallback to single service or booking data total
     const totalPrice = state.bookingData.totalPrice || state.bookingData.servicePrice || 0;
-    // Ensure it's a number, not a string
-    return typeof totalPrice === 'string' ? parseFloat(totalPrice) || 0 : totalPrice;
+    const fallbackTotal = typeof totalPrice === 'string' ? parseFloat(totalPrice) || 0 : totalPrice;
+    console.log(`💰 Using fallback total: ₱${fallbackTotal}`);
+    return fallbackTotal;
   };
 
   const getTotalDuration = () => {
@@ -95,7 +114,7 @@ export default function BookingSummaryScreen() {
     return typeof totalDuration === 'string' ? parseInt(totalDuration) || 0 : totalDuration;
   };
 
-  const handleCreateAppointment = () => {
+  const handleCreateAppointment = async () => {
     // Validation 1: Check if user is logged in
     if (!user) {
       Alert.alert('Authentication Required', 'Please log in to book an appointment.');
@@ -194,16 +213,25 @@ export default function BookingSummaryScreen() {
       return;
     }
 
+    // Validation 13: Removed - Users can now book multiple appointments
+
     // Show confirmation modal
     setShowConfirmationModal(true);
   };
 
   const handleConfirmAppointment = async () => {
     setShowConfirmationModal(false);
-
     setIsCreating(true);
     
     try {
+      console.log('🔄 Starting appointment creation process...');
+      console.log('📋 User data:', {
+        id: user?.id,
+        name: user?.name,
+        email: user?.email,
+        phone: user?.phone
+      });
+      console.log('📋 Booking data:', state.bookingData);
       // Validation 11: Final data integrity check before creating appointment
       const requiredFields = ['branchId', 'date', 'time'];
       const missingFields = requiredFields.filter(field => !state.bookingData[field as keyof typeof state.bookingData]);
@@ -229,14 +257,34 @@ export default function BookingSummaryScreen() {
         return;
       }
 
+      // Validation 14: Ensure date and time are in correct format for appointments collection
+      const appointmentDate = state.bookingData.date || '';
+      const appointmentTime = state.bookingData.time || '';
+      
+      // Validate date format (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(appointmentDate)) {
+        Alert.alert('Invalid Date Format', 'Appointment date must be in YYYY-MM-DD format.');
+        return;
+      }
+      
+      // Validate time format (HH:MM)
+      const timeRegex = /^\d{2}:\d{2}$/;
+      if (!timeRegex.test(appointmentTime)) {
+        Alert.alert('Invalid Time Format', 'Appointment time must be in HH:MM format.');
+        return;
+      }
+
       // Prepare appointment data to match your normalized database structure
       // Handle multiple services with their assigned stylists
       const serviceStylistPairs = state.bookingData.selectedServices?.map(service => {
         const stylist = state.bookingData.selectedStylists?.[service.id];
+        // Use servicePricing for accurate pricing, fallback to service.price
+        const servicePrice = servicePricing[service.id] || service.price || 0;
         return {
           serviceId: service.id,
           serviceName: service.name,
-          servicePrice: service.price,
+          servicePrice: servicePrice,
           stylistId: stylist?.id || state.bookingData.stylistId || '',
           stylistName: stylist ? `${stylist.firstName} ${stylist.lastName}` : state.bookingData.stylistName || ''
         };
@@ -244,39 +292,51 @@ export default function BookingSummaryScreen() {
 
       // If single service (fallback), create serviceStylistPairs array
       if (serviceStylistPairs.length === 0 && state.bookingData.serviceId) {
+        // Use servicePricing for accurate pricing, fallback to servicePrice
+        const servicePrice = servicePricing[state.bookingData.serviceId] || state.bookingData.servicePrice || 0;
         serviceStylistPairs.push({
           serviceId: state.bookingData.serviceId,
           serviceName: state.bookingData.serviceName || 'Service',
-          servicePrice: state.bookingData.servicePrice || 0,
+          servicePrice: servicePrice,
           stylistId: state.bookingData.stylistId || '',
           stylistName: state.bookingData.stylistName || ''
         });
       }
 
       const appointmentData = {
-        appointmentDate: state.bookingData.date || '',
-        appointmentTime: state.bookingData.time || '',
-        branchId: state.bookingData.branchId || '',
-        clientEmail: user?.email || '',
-        clientId: user?.id || '',
-        clientName: user?.name || 'Client',
-        clientPhone: user?.phone || '',
-        createdAt: new Date(),
-        createdBy: user?.id || '',
+        // Core appointment fields - exact match with appointments collection
+        appointmentDate: state.bookingData.date || '', // string: 'YYYY-MM-DD' format
+        appointmentTime: state.bookingData.time || '', // string: 'HH:MM' format (24-hour)
+        branchId: state.bookingData.branchId || '', // string: unique identifier for branch
+        clientEmail: user?.email || '', // string: client's email address
+        clientId: user?.id || '', // string: unique user ID of the client
+        clientName: user?.name || 'Client', // string: full name of the client
+        clientPhone: user?.phone || '', // string: client's contact phone number
+        createdBy: user?.id || '', // string: user ID who created the appointment
+        notes: notes || '', // string: general instructions or comments
+        status: "pending", // string: current state of the booking
+        totalPrice: getTotalPrice(), // number: sum of all service prices
+        
+        // Complex fields - exact match with appointments collection
         history: [{
-          action: "created",
-          by: user?.id || '',
-          notes: "Appointment created",
-          timestamp: new Date().toISOString()
+          action: "created", // string: type of change performed
+          by: user?.id || '', // string: user ID who executed the action
+          notes: "Appointment created", // string: description providing context
+          timestamp: new Date().toISOString() // string: specific time the action was logged
         }],
-        notes: notes || '',
-        serviceStylistPairs: serviceStylistPairs,
-        status: "scheduled",
-        totalPrice: getTotalPrice(),
-        updatedAt: new Date()
+        
+        serviceStylistPairs: serviceStylistPairs.map(pair => ({
+          serviceId: pair.serviceId, // string: unique ID of the service
+          serviceName: pair.serviceName, // string: full name of the service
+          servicePrice: pair.servicePrice, // number: cost of this specific service
+          stylistId: pair.stylistId, // string: unique user ID of assigned staff
+          stylistName: pair.stylistName // string: full name of assigned staff
+        }))
+        
+        // Note: createdAt and updatedAt will be handled by the service using serverTimestamp()
       };
 
-      // Validation 14: Final appointment data validation
+      // Validation 15: Final appointment data validation
       if (!appointmentData.serviceStylistPairs || appointmentData.serviceStylistPairs.length === 0) {
         Alert.alert('No Services', 'No services selected for this appointment.');
         return;
@@ -287,13 +347,30 @@ export default function BookingSummaryScreen() {
         return;
       }
 
-      // Validation 15: Ensure each service has a stylist assigned
+      // Validation 16: Ensure each service has a stylist assigned
       const servicesWithoutStylists = serviceStylistPairs.filter(pair => !pair.stylistId);
       if (servicesWithoutStylists.length > 0) {
         Alert.alert('Stylist Assignment Required', 'All services must have a stylist assigned.');
         return;
       }
 
+      // Log the final appointment data before creation
+      console.log('📋 Final appointment data to be created:', appointmentData);
+      console.log('📋 Appointment fields validation:');
+      console.log('  - appointmentDate:', appointmentData.appointmentDate, '(string, YYYY-MM-DD)');
+      console.log('  - appointmentTime:', appointmentData.appointmentTime, '(string, HH:MM)');
+      console.log('  - branchId:', appointmentData.branchId, '(string)');
+      console.log('  - clientEmail:', appointmentData.clientEmail, '(string)');
+      console.log('  - clientId:', appointmentData.clientId, '(string)');
+      console.log('  - clientName:', appointmentData.clientName, '(string)');
+      console.log('  - clientPhone:', appointmentData.clientPhone, '(string)');
+      console.log('  - createdBy:', appointmentData.createdBy, '(string)');
+      console.log('  - notes:', appointmentData.notes, '(string)');
+      console.log('  - status:', appointmentData.status, '(string)');
+      console.log('  - totalPrice:', appointmentData.totalPrice, '(number)');
+      console.log('  - serviceStylistPairs count:', appointmentData.serviceStylistPairs.length);
+      console.log('  - history count:', appointmentData.history.length);
+      
       // Create appointment
       const appointmentId = await MobileAppointmentService.createAppointment(appointmentData);
       
@@ -317,9 +394,13 @@ export default function BookingSummaryScreen() {
         ]
       );
     } catch (error) {
-      console.error('Error creating appointment:', error);
+      console.error('❌ Error creating appointment:', error);
+      console.error('❌ Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+      });
       
-      // Validation 15: Handle specific error types
+      // Handle specific error types
       if (error instanceof Error) {
         if (error.message.includes('network') || error.message.includes('fetch')) {
           Alert.alert('Network Error', 'Please check your internet connection and try again.');
@@ -329,6 +410,8 @@ export default function BookingSummaryScreen() {
           Alert.alert('Appointment Conflict', 'There may be a scheduling conflict. Please try a different time.');
         } else if (error.message.includes('validation') || error.message.includes('invalid')) {
           Alert.alert('Invalid Data', 'Some appointment information is invalid. Please go back and check your selections.');
+        } else if (error.message.includes('FirebaseError') || error.message.includes('firestore')) {
+          Alert.alert('Database Error', 'There was an issue saving your appointment. Please try again.');
         } else {
           Alert.alert('Booking Error', `Failed to book appointment: ${error.message}`);
         }
@@ -470,7 +553,7 @@ export default function BookingSummaryScreen() {
                           <Text style={styles.stylistName}>
                             with {stylist?.name || 'No stylist assigned'}
                           </Text>
-                          <Text style={styles.servicePrice}>₱{service.price}</Text>
+                          <Text style={styles.servicePrice}>₱{servicePricing[service.id] || service.price}</Text>
                         </View>
                       </View>
                     );
@@ -565,7 +648,7 @@ export default function BookingSummaryScreen() {
 
   // For mobile, use ScreenWrapper with header
   return (
-    <ScreenWrapper title="Book Appointment">
+    <ScreenWrapper title="Book Appointment" scrollable={false}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Progress Indicator */}
         <View style={styles.progressContainer}>
@@ -673,7 +756,7 @@ export default function BookingSummaryScreen() {
                           <Text style={styles.stylistName}>
                             with {stylist?.name || 'No stylist assigned'}
                           </Text>
-                          <Text style={styles.servicePrice}>₱{service.price}</Text>
+                          <Text style={styles.servicePrice}>₱{servicePricing[service.id] || service.price}</Text>
                         </View>
                       </View>
                     );
@@ -777,53 +860,103 @@ export default function BookingSummaryScreen() {
               <Text style={styles.modalTitle}>Confirm Appointment</Text>
             </View>
             
-            <View style={styles.modalContent}>
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
               <Text style={styles.modalText}>
-                Are you sure you want to book this appointment?
+                Please review your appointment details before confirming:
               </Text>
               
-              <View style={styles.appointmentDetails}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Date:</Text>
-                  <Text style={styles.detailValue}>{state.bookingData.date}</Text>
+              {/* Appointment Summary Card */}
+              <View style={styles.appointmentSummaryCard}>
+                {/* Date & Time Section */}
+                <View style={styles.summarySection}>
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="calendar-outline" size={20} color={APP_CONFIG.primaryColor} />
+                    <Text style={styles.sectionTitle}>Appointment Details</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Date</Text>
+                    <Text style={styles.detailValue}>{formatDate(state.bookingData.date || '')}</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Time</Text>
+                    <Text style={styles.detailValue}>{formatTime(state.bookingData.time || '')}</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Branch</Text>
+                    <Text style={styles.detailValue}>
+                      {state.bookingData.branchName || getBranchName(state.bookingData.branchId)}
+                    </Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Duration</Text>
+                    <Text style={styles.detailValue}>{getTotalDuration()} minutes</Text>
+                  </View>
                 </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Time:</Text>
-                  <Text style={styles.detailValue}>{state.bookingData.time}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Branch:</Text>
-                  <Text style={styles.detailValue}>
-                    {state.bookingData.branchName || getBranchName(state.bookingData.branchId)}
-                  </Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Total:</Text>
-                  <Text style={styles.detailValue}>₱{getTotalPrice()}</Text>
-                </View>
-                {state.bookingData.selectedServices && state.bookingData.selectedServices.length > 0 && (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Services & Stylists:</Text>
-                    <View style={styles.serviceStylistList}>
-                      {state.bookingData.selectedServices.map((service, index) => {
-                        const stylist = state.bookingData.selectedStylists?.[service.id];
-                        return (
-                          <Text key={index} style={styles.serviceStylistItem}>
-                            {service.name} → {stylist ? `${stylist.firstName} ${stylist.lastName}` : 'No stylist assigned'}
-                          </Text>
-                        );
-                      })}
+
+                {/* Services & Stylists Section */}
+                <View style={styles.summarySection}>
+                  <View style={styles.sectionHeader}>
+                    <Ionicons name="cut-outline" size={20} color={APP_CONFIG.primaryColor} />
+                    <Text style={styles.sectionTitle}>Services & Stylists</Text>
+                  </View>
+                  {state.bookingData.selectedServices && state.bookingData.selectedServices.length > 0 ? (
+                    state.bookingData.selectedServices.map((service, index) => {
+                      const stylist = state.bookingData.selectedStylists?.[service.id];
+                      const servicePrice = servicePricing[service.id] || service.price || 0;
+                      return (
+                        <View key={service.id} style={styles.serviceItem}>
+                          <View style={styles.serviceInfo}>
+                            <Text style={styles.serviceName}>{service.name}</Text>
+                            <Text style={styles.serviceCategory}>{service.category}</Text>
+                            <Text style={styles.serviceDuration}>{service.duration} min</Text>
+                          </View>
+                          <View style={styles.serviceDetails}>
+                            <Text style={styles.stylistName}>
+                              Stylist: {stylist ? `${stylist.firstName} ${stylist.lastName}` : 'Not assigned'}
+                            </Text>
+                            <Text style={styles.servicePrice}>₱{servicePrice}</Text>
+                          </View>
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <View style={styles.serviceItem}>
+                      <View style={styles.serviceInfo}>
+                        <Text style={styles.serviceName}>{state.bookingData.serviceName}</Text>
+                        <Text style={styles.serviceCategory}>General</Text>
+                        <Text style={styles.serviceDuration}>{state.bookingData.serviceDuration} min</Text>
+                      </View>
+                      <View style={styles.serviceDetails}>
+                        <Text style={styles.stylistName}>
+                          Stylist: {state.bookingData.stylistName || 'Not assigned'}
+                        </Text>
+                        <Text style={styles.servicePrice}>₱{state.bookingData.servicePrice}</Text>
+                      </View>
                     </View>
-                  </View>
-                )}
+                  )}
+                </View>
+
+                {/* Notes Section */}
                 {notes && (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Notes:</Text>
-                    <Text style={styles.detailValue}>{notes}</Text>
+                  <View style={styles.summarySection}>
+                    <View style={styles.sectionHeader}>
+                      <Ionicons name="document-text-outline" size={20} color={APP_CONFIG.primaryColor} />
+                      <Text style={styles.sectionTitle}>Special Notes</Text>
+                    </View>
+                    <Text style={styles.notesText}>{notes}</Text>
                   </View>
                 )}
+
+                {/* Total Price Section */}
+                <View style={styles.totalSection}>
+                  <View style={styles.totalRow}>
+                    <Text style={styles.totalLabel}>Total Amount</Text>
+                    <Text style={styles.totalValue}>₱{getTotalPrice()}</Text>
+                  </View>
+                  <Text style={styles.totalNote}>* Final cost may vary based on service complexity</Text>
+                </View>
               </View>
-            </View>
+            </ScrollView>
             
             <View style={styles.modalButtons}>
               <TouchableOpacity
@@ -834,12 +967,15 @@ export default function BookingSummaryScreen() {
               </TouchableOpacity>
               
               <TouchableOpacity
-                style={styles.confirmButton}
+                style={[styles.confirmButton, isCreating && styles.disabledButton]}
                 onPress={handleConfirmAppointment}
                 disabled={isCreating}
               >
                 {isCreating ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmButtonText}>Creating...</Text>
+                  </>
                 ) : (
                   <Text style={styles.confirmButtonText}>Confirm Booking</Text>
                 )}
@@ -892,13 +1028,12 @@ const styles = StyleSheet.create({
     backgroundColor: APP_CONFIG.primaryColor,
   },
   stepNumber: {
-    fontSize: Platform.OS === 'web' ? 16 : Platform.OS === 'ios' ? 12 : 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     fontFamily: FONTS.bold,
     color: '#FFFFFF',
   },
   stepLabel: {
-    fontSize: Platform.OS === 'web' ? 12 : Platform.OS === 'android' ? 9 : 9,
-    fontFamily: FONTS.medium,
+    ...TYPOGRAPHY_STYLES.label,
     color: '#666',
     textAlign: 'center',
     maxWidth: Platform.OS === 'android' ? 50 : 55,
@@ -916,16 +1051,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Platform.OS === 'web' ? 0 : 16,
     marginBottom: 24,
   },
-  sectionTitle: {
-    fontSize: Platform.OS === 'web' ? 25 : Platform.OS === 'ios' ? 18 : 18,
-    color: Platform.OS === 'web' ? '#160B53' : '#160B53',
-    fontFamily: Platform.OS === 'web' ? 'Poppins_700Bold' : FONTS.bold,
-    marginBottom: 8,
-  },
   sectionSubtitle: {
-    fontSize: Platform.OS === 'android' ? 12 : Platform.OS === 'ios' ? 13 : 14,
+    ...TYPOGRAPHY_STYLES.label,
     color: '#666',
-    fontFamily: FONTS.regular,
     marginBottom: 24,
   },
   summaryCard: {
@@ -942,10 +1070,17 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionHeader: {
-    fontSize: Platform.OS === 'android' ? 16 : Platform.OS === 'ios' ? 17 : 18,
-    fontFamily: FONTS.bold,
-    color: '#160B53',
-    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  sectionTitle: {
+    ...TYPOGRAPHY_STYLES.sectionTitle,
+    color: '#1F2937',
+    marginLeft: 8,
   },
   infoGrid: {
     gap: 12,
@@ -959,14 +1094,12 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F0F0F0',
   },
   infoLabel: {
-    fontSize: Platform.OS === 'android' ? 12 : Platform.OS === 'ios' ? 13 : 14,
-    fontFamily: FONTS.medium,
+    ...TYPOGRAPHY_STYLES.label,
     color: '#666',
     flex: 1,
   },
   infoValue: {
-    fontSize: Platform.OS === 'android' ? 12 : Platform.OS === 'ios' ? 13 : 14,
-    fontFamily: FONTS.regular,
+    ...TYPOGRAPHY_STYLES.label,
     color: '#160B53',
     flex: 1,
     textAlign: 'right',
@@ -975,46 +1108,47 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   serviceItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   serviceInfo: {
-    flex: 1,
+    marginBottom: 8,
   },
   serviceName: {
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
+    ...TYPOGRAPHY_STYLES.body,
     fontFamily: FONTS.bold,
-    color: '#160B53',
+    color: '#1F2937',
     marginBottom: 4,
   },
   serviceCategory: {
-    fontSize: Platform.OS === 'android' ? 10 : Platform.OS === 'ios' ? 11 : 12,
-    fontFamily: FONTS.medium,
+    ...TYPOGRAPHY_STYLES.label,
     color: APP_CONFIG.primaryColor,
     marginBottom: 2,
   },
   serviceDuration: {
-    fontSize: Platform.OS === 'android' ? 10 : Platform.OS === 'ios' ? 11 : 12,
-    fontFamily: FONTS.regular,
-    color: '#666',
+    ...TYPOGRAPHY_STYLES.label,
+    color: '#6B7280',
   },
   serviceDetails: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   stylistName: {
-    fontSize: Platform.OS === 'android' ? 12 : Platform.OS === 'ios' ? 13 : 14,
-    fontFamily: FONTS.regular,
+    ...TYPOGRAPHY_STYLES.caption,
+    fontFamily: FONTS.medium,
     color: '#10B981',
-    marginBottom: 4,
+    flex: 1,
   },
   servicePrice: {
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
+    ...TYPOGRAPHY_STYLES.body,
     fontFamily: FONTS.bold,
     color: APP_CONFIG.primaryColor,
+    marginLeft: 8,
   },
   notesSection: {
     backgroundColor: '#F8F9FA',
@@ -1023,22 +1157,28 @@ const styles = StyleSheet.create({
     marginVertical: 16,
   },
   notesText: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontStyle: 'italic',
-    marginTop: 8,
+    ...TYPOGRAPHY_STYLES.bodySmall,
+    color: '#374151',
+    lineHeight: 20,
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   totalSection: {
-    borderTopWidth: 2,
-    borderTopColor: '#E5E7EB',
-    paddingTop: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: APP_CONFIG.primaryColor,
     marginTop: 8,
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   totalLabelContainer: {
     flexDirection: 'row',
@@ -1046,9 +1186,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   totalLabel: {
-    fontSize: 18,
-    fontFamily: FONTS.bold,
-    color: '#160B53',
+    ...TYPOGRAPHY_STYLES.subheader,
+    color: '#1F2937',
   },
   estimateBadge: {
     backgroundColor: '#FEF3C7',
@@ -1059,19 +1198,20 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   estimateBadgeText: {
-    fontSize: 10,
+    ...TYPOGRAPHY_STYLES.tiny,
     fontFamily: FONTS.bold,
     color: '#D97706',
   },
   totalValue: {
-    fontSize: 20,
+    ...TYPOGRAPHY_STYLES.header,
     fontFamily: FONTS.bold,
     color: APP_CONFIG.primaryColor,
   },
   totalNote: {
-    fontSize: 12,
-    fontFamily: FONTS.regular,
-    color: '#999',
+    ...TYPOGRAPHY_STYLES.label,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 4,
   },
   navigationContainer: {
     flexDirection: 'row',
@@ -1093,7 +1233,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   previousButtonText: {
-    fontSize: 16,
+    ...TYPOGRAPHY_STYLES.sectionTitle,
     fontFamily: FONTS.medium,
     color: '#666',
   },
@@ -1106,12 +1246,8 @@ const styles = StyleSheet.create({
     backgroundColor: APP_CONFIG.primaryColor,
     gap: 8,
   },
-  disabledButton: {
-    backgroundColor: '#E5E7EB',
-  },
   createButtonText: {
-    fontSize: 16,
-    fontFamily: FONTS.bold,
+    ...TYPOGRAPHY_STYLES.button,
     color: '#FFFFFF',
   },
   notesInput: {
@@ -1119,8 +1255,7 @@ const styles = StyleSheet.create({
     borderColor: '#D1D5DB',
     borderRadius: 8,
     padding: 12,
-    fontSize: 14,
-    fontFamily: FONTS.regular,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#374151',
     backgroundColor: '#FFFFFF',
     minHeight: 80,
@@ -1132,32 +1267,36 @@ const styles = StyleSheet.create({
     backgroundColor: '#FEF2F2',
   },
   notesErrorText: {
+    ...TYPOGRAPHY_STYLES.label,
     color: '#EF4444',
-    fontSize: 12,
-    fontFamily: FONTS.medium,
     marginTop: 4,
   },
   notesCharCount: {
+    ...TYPOGRAPHY_STYLES.label,
     color: '#6B7280',
-    fontSize: 12,
-    fontFamily: FONTS.regular,
     textAlign: 'right',
     marginTop: 4,
   },
   // Modal styles
   modalOverlay: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
+    zIndex: 9999,
   },
   modalContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 24,
+    padding: 20,
     width: '100%',
-    maxWidth: 400,
+    maxWidth: 420,
+    maxHeight: '85%',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -1172,22 +1311,22 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    fontSize: 20,
-    fontFamily: FONTS.bold,
+    ...TYPOGRAPHY_STYLES.header,
     color: '#1F2937',
     marginTop: 12,
     textAlign: 'center',
   },
   modalContent: {
-    marginBottom: 24,
+    marginBottom: 20,
+    maxHeight: 400,
   },
   modalText: {
-    fontSize: 16,
+    ...TYPOGRAPHY_STYLES.sectionTitle,
     fontFamily: FONTS.medium,
     color: '#374151',
     textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 24,
+    marginBottom: 16,
+    lineHeight: 22,
   },
   appointmentDetails: {
     backgroundColor: '#F8F9FA',
@@ -1203,14 +1342,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   detailLabel: {
-    fontSize: 14,
-    fontFamily: FONTS.medium,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#6B7280',
     flex: 1,
   },
   detailValue: {
-    fontSize: 14,
-    fontFamily: FONTS.medium,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#1F2937',
     flex: 2,
     textAlign: 'right',
@@ -1229,8 +1366,7 @@ const styles = StyleSheet.create({
     borderColor: '#D1D5DB',
   },
   cancelButtonText: {
-    fontSize: 16,
-    fontFamily: FONTS.semiBold,
+    ...TYPOGRAPHY_STYLES.button,
     color: '#374151',
   },
   confirmButton: {
@@ -1243,19 +1379,53 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
+  disabledButton: {
+    backgroundColor: '#E5E7EB',
+    opacity: 0.6,
+  },
   confirmButtonText: {
-    fontSize: 16,
-    fontFamily: FONTS.semiBold,
+    ...TYPOGRAPHY_STYLES.button,
     color: '#FFFFFF',
   },
   serviceStylistList: {
     marginTop: 8,
   },
+  serviceStylistItemContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
   serviceStylistItem: {
-    fontSize: 12,
-    fontFamily: FONTS.medium,
+    ...TYPOGRAPHY_STYLES.label,
     color: '#374151',
-    marginBottom: 4,
+    flex: 1,
     lineHeight: 16,
+  },
+  serviceStylistPrice: {
+    ...TYPOGRAPHY_STYLES.label,
+    fontFamily: FONTS.bold,
+    color: APP_CONFIG.primaryColor,
+    marginLeft: 8,
+  },
+  // New modal styles for better layout
+  appointmentSummaryCard: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  summarySection: {
+    marginBottom: 20,
+  },
+  detailItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
   },
 });

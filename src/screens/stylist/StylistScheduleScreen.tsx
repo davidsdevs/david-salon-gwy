@@ -217,7 +217,7 @@ export default function StylistScheduleScreen() {
 
   // For mobile, use ScreenWrapper with header
   return (
-    <ScreenWrapper title="Schedule" userType="stylist">
+    <ScreenWrapper title="Schedule" userType="stylist" scrollable={false}>
       <ScrollView ref={scrollViewRef} style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Schedule Management Header */}
         <StylistSection isTitle>

@@ -7,12 +7,15 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import useAuth from '../../hooks/useAuth';
+import { useDashboard } from '../../hooks/useDashboard';
 import { APP_CONFIG, FONTS } from '../../constants';
 import { Appointment } from '../../types';
 
@@ -21,55 +24,47 @@ const { width } = Dimensions.get('window');
 export default function DashboardScreen() {
   const { user } = useAuth();
   const navigation = useNavigation();
+  const { dashboardData, loading, error, refresh } = useDashboard();
 
+  // Handle loading state
+  if (loading) {
+    return (
+      <ScreenWrapper title="Dashboard">
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={APP_CONFIG.primaryColor} />
+          <Text style={styles.loadingText}>Loading dashboard...</Text>
+        </View>
+      </ScreenWrapper>
+    );
+  }
 
-  const upcomingAppointments: Appointment[] = [
-    {
-      id: 1,
-      service: 'Hair Cut & Style',
-      stylist: 'Sarah Johnson',
-      date: '2025-08-15',
-      time: '2:00 PM',
-      location: 'Naga City',
-      status: 'confirmed',
-    },
-    {
-      id: 2,
-      service: 'Manicure',
-      stylist: 'Lisa Chen',
-      date: '2025-08-15',
-      time: '2:00 PM',
-      location: 'Naga City',
-      status: 'pending',
-    },
-  ];
+  // Handle error state
+  if (error) {
+    return (
+      <ScreenWrapper title="Dashboard">
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color="#EF4444" />
+          <Text style={styles.errorText}>Failed to load dashboard</Text>
+          <Text style={styles.errorSubtext}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      </ScreenWrapper>
+    );
+  }
 
-  const recentVisits = [
-    {
-      id: 1,
-      service: 'Hair Cut & Style',
-      stylist: 'Sarah Johnson',
-      date: '2025-08-15',
-      price: '₱1,500',
-      rating: 5,
-    },
-    {
-      id: 2,
-      service: 'Hair Color',
-      stylist: 'Maria Rodriguez',
-      date: '2025-03-26',
-      price: '₱3,200',
-      rating: 5,
-    },
-    {
-      id: 3,
-      service: 'Manicure',
-      stylist: 'Lisa Chen',
-      date: '2025-01-10',
-      price: '₱350',
-      rating: 5,
-    },
-  ];
+  // Use real data or fallback to empty arrays
+  const upcomingAppointments = dashboardData?.upcomingAppointments || [];
+  const recentVisits = dashboardData?.recentVisits || [];
+  const stats = dashboardData?.stats || {
+    todayAppointments: 0,
+    totalVisits: 0,
+    loyaltyPoints: 0,
+    favoriteStylists: 0,
+    totalSpent: 0,
+    referrals: 0
+  };
 
   const rewards = [
     {
@@ -127,11 +122,11 @@ export default function DashboardScreen() {
           >
             <View style={styles.membershipTop}>
               <View style={styles.membershipLeft}>
-                <Text style={styles.membershipTitle}>{user?.membershipLevel || 'Gold'} Member</Text>
-                <Text style={styles.membershipSince}>Member since {user?.memberSince || '2022'}</Text>
+                <Text style={styles.membershipTitle}>{dashboardData?.membershipLevel || 'Gold'} Member</Text>
+                <Text style={styles.membershipSince}>Member since {dashboardData?.memberSince || '2022'}</Text>
               </View>
               <View style={styles.membershipRight}>
-                <Text style={styles.pointsValue}>{user?.points || 1250}</Text>
+                <Text style={styles.pointsValue}>{dashboardData?.points || 1250}</Text>
                 <Text style={styles.pointsLabel}>Points</Text>
               </View>
             </View>
@@ -175,7 +170,7 @@ export default function DashboardScreen() {
                   <Ionicons name="calendar" size={24} color="#160B53" />
                 </View>
               </View>
-              <Text style={styles.statValue}>8</Text>
+              <Text style={styles.statValue}>{stats.todayAppointments}</Text>
             </View>
             <View style={styles.statCard}>
               <View style={styles.statHeader}>
@@ -184,7 +179,7 @@ export default function DashboardScreen() {
                   <Ionicons name="checkmark-circle" size={24} color="#10B981" />
                 </View>
               </View>
-              <Text style={styles.statValue}>23</Text>
+              <Text style={styles.statValue}>{stats.totalVisits}</Text>
             </View>
             <View style={styles.statCard}>
               <View style={styles.statHeader}>
@@ -193,7 +188,7 @@ export default function DashboardScreen() {
                   <Ionicons name="gift" size={24} color="#8B5CF6" />
                 </View>
               </View>
-              <Text style={styles.statValue}>1250</Text>
+              <Text style={styles.statValue}>{stats.loyaltyPoints}</Text>
             </View>
             <View style={styles.statCard}>
               <View style={styles.statHeader}>
@@ -202,7 +197,7 @@ export default function DashboardScreen() {
                   <Ionicons name="heart" size={24} color="#EF4444" />
                 </View>
               </View>
-              <Text style={styles.statValue}>3</Text>
+              <Text style={styles.statValue}>{stats.favoriteStylists}</Text>
             </View>
           </View>
 
@@ -300,11 +295,11 @@ export default function DashboardScreen() {
         {/* Top Section - Membership & Points */}
         <View style={styles.membershipTop}>
           <View style={styles.membershipLeft}>
-            <Text style={styles.membershipTitle}>{user?.membershipLevel || 'Gold'} Member</Text>
-            <Text style={styles.membershipSince}>Member since {user?.memberSince || '2022'}</Text>
+            <Text style={styles.membershipTitle}>{dashboardData?.membershipLevel || 'Gold'} Member</Text>
+            <Text style={styles.membershipSince}>Member since {dashboardData?.memberSince || '2022'}</Text>
           </View>
           <View style={styles.membershipRight}>
-            <Text style={styles.pointsValue}>{user?.points || 1250}</Text>
+            <Text style={styles.pointsValue}>{dashboardData?.points || 1250}</Text>
             <Text style={styles.pointsLabel}>Points</Text>
           </View>
         </View>
@@ -325,15 +320,15 @@ export default function DashboardScreen() {
         {/* Bottom Section - Key Metrics */}
         <View style={styles.metricsSection}>
           <View style={styles.metricItem}>
-            <Text style={styles.metricValue}>24</Text>
+            <Text style={styles.metricValue}>{stats.totalVisits}</Text>
             <Text style={styles.membershipMetricLabel}>Total Visits</Text>
           </View>
           <View style={styles.metricItem}>
-            <Text style={styles.metricValue}>3</Text>
+            <Text style={styles.metricValue}>{stats.referrals}</Text>
             <Text style={styles.membershipMetricLabel}>Referrals</Text>
           </View>
           <View style={styles.metricItem}>
-            <Text style={styles.metricValue}>₱2850</Text>
+            <Text style={styles.metricValue}>₱{stats.totalSpent}</Text>
             <Text style={styles.membershipMetricLabel}>Total Earned</Text>
           </View>
         </View>
@@ -380,14 +375,14 @@ export default function DashboardScreen() {
             <View style={styles.metricIcon}>
               <Ionicons name="calendar" size={24} color="#160B53" />
             </View>
-            <Text style={styles.metricNumber}>8</Text>
+            <Text style={styles.metricNumber}>{stats.todayAppointments}</Text>
             <Text style={styles.metricLabel}>Today Appointments</Text>
           </View>
           <View style={styles.metricCard}>
             <View style={styles.metricIcon}>
               <Ionicons name="time" size={24} color="#160B53" />
             </View>
-            <Text style={styles.metricNumber}>23</Text>
+            <Text style={styles.metricNumber}>{stats.totalVisits}</Text>
             <Text style={styles.metricLabel}>Total Visits</Text>
           </View>
         </View>
@@ -396,14 +391,14 @@ export default function DashboardScreen() {
             <View style={styles.metricIcon}>
               <Ionicons name="gift" size={24} color="#160B53" />
             </View>
-            <Text style={styles.metricNumber}>1250</Text>
+            <Text style={styles.metricNumber}>{stats.loyaltyPoints}</Text>
             <Text style={styles.metricLabel}>Loyalty Points</Text>
           </View>
           <View style={styles.metricCard}>
             <View style={styles.metricIcon}>
               <Ionicons name="heart" size={24} color="#160B53" />
             </View>
-            <Text style={styles.metricNumber}>3</Text>
+            <Text style={styles.metricNumber}>{stats.favoriteStylists}</Text>
             <Text style={styles.metricLabel}>Favorite Stylists</Text>
           </View>
         </View>
@@ -985,6 +980,44 @@ const styles = StyleSheet.create({
   },
   statusPending: {
     backgroundColor: '#F59E0B',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 40,
+  },
+  errorText: {
+    fontSize: 18,
+    fontFamily: FONTS.bold,
+    color: '#EF4444',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorSubtext: {
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: APP_CONFIG.primaryColor,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: FONTS.semiBold,
   },
   // ========================================
   // END OF WEB-SPECIFIC STYLES

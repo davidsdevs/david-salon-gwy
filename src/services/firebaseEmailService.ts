@@ -1,6 +1,6 @@
 import { httpsCallable } from 'firebase/functions';
 import { getFunctions } from 'firebase/functions';
-import { app } from '../config/firebase';
+import app from '../config/firebase';
 
 export interface AppointmentEmailData {
   clientName: string;

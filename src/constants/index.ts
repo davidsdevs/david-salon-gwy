@@ -53,6 +53,86 @@ export const TYPOGRAPHY = {
   input: 15,
 } as const;
 
+// Typography styles for consistent usage across components
+export const TYPOGRAPHY_STYLES = {
+  // Headers
+  header: {
+    fontSize: TYPOGRAPHY.h1,
+    fontFamily: FONTS.bold,
+    color: APP_CONFIG.textColor,
+  },
+  subheader: {
+    fontSize: TYPOGRAPHY.h3,
+    fontFamily: FONTS.semiBold,
+    color: APP_CONFIG.textColor,
+  },
+  sectionTitle: {
+    fontSize: TYPOGRAPHY.h4,
+    fontFamily: FONTS.semiBold,
+    color: APP_CONFIG.textColor,
+  },
+  
+  // Body text
+  body: {
+    fontSize: TYPOGRAPHY.body,
+    fontFamily: FONTS.regular,
+    color: APP_CONFIG.textColor,
+  },
+  bodySmall: {
+    fontSize: TYPOGRAPHY.bodySmall,
+    fontFamily: FONTS.regular,
+    color: APP_CONFIG.textColor,
+  },
+  
+  // Labels and captions
+  label: {
+    fontSize: TYPOGRAPHY.label,
+    fontFamily: FONTS.medium,
+    color: APP_CONFIG.lightTextColor,
+  },
+  caption: {
+    fontSize: TYPOGRAPHY.caption,
+    fontFamily: FONTS.regular,
+    color: APP_CONFIG.lightTextColor,
+  },
+  tiny: {
+    fontSize: TYPOGRAPHY.tiny,
+    fontFamily: FONTS.regular,
+    color: APP_CONFIG.lightTextColor,
+  },
+  
+  // Special
+  button: {
+    fontSize: TYPOGRAPHY.button,
+    fontFamily: FONTS.semiBold,
+    color: '#FFFFFF',
+  },
+  input: {
+    fontSize: TYPOGRAPHY.input,
+    fontFamily: FONTS.regular,
+    color: APP_CONFIG.textColor,
+  },
+  
+  // Price text
+  price: {
+    fontSize: TYPOGRAPHY.body,
+    fontFamily: FONTS.bold,
+    color: APP_CONFIG.textColor,
+  },
+  priceSmall: {
+    fontSize: TYPOGRAPHY.bodySmall,
+    fontFamily: FONTS.bold,
+    color: APP_CONFIG.textColor,
+  },
+  
+  // Status text
+  status: {
+    fontSize: TYPOGRAPHY.caption,
+    fontFamily: FONTS.medium,
+    color: '#FFFFFF',
+  },
+} as const;
+
 // Spacing - Consistent spacing values
 export const SPACING = {
   xs: 4,

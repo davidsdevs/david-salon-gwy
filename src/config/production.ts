@@ -42,6 +42,8 @@ export const PRODUCTION_CONFIG = {
   HEALTH_CHECK_INTERVAL: 60000, // 1 minute
   CRASH_REPORTING: true,
   PERFORMANCE_MONITORING: true,
+  // Cloudinary signer (optional). Set EXPO_PUBLIC_CLOUDINARY_SIGNER_URL when using signed uploads in production
+  CLOUDINARY_SIGNER_URL: process.env['EXPO_PUBLIC_CLOUDINARY_SIGNER_URL'],
 };
 
 // Development overrides
@@ -51,6 +53,8 @@ export const DEVELOPMENT_CONFIG = {
   LOG_LEVEL: 'debug',
   DEBUG_MODE: true,
   ENVIRONMENT: 'development',
+  // Prefer Android emulator loopback; override via EXPO_PUBLIC_CLOUDINARY_SIGNER_URL
+  CLOUDINARY_SIGNER_URL: process.env['EXPO_PUBLIC_CLOUDINARY_SIGNER_URL'] || undefined,
   FEATURES: {
     ...PRODUCTION_CONFIG.FEATURES,
     OFFLINE_MODE: false, // Disable offline mode in development

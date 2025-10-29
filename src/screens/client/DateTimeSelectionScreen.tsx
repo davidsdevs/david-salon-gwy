@@ -16,6 +16,7 @@ import ScreenWrapper from '../../components/ScreenWrapper';
 import ResponsiveLayout from '../../components/ResponsiveLayout';
 import { APP_CONFIG, FONTS } from '../../constants';
 import MobileAppointmentService from '../../services/mobileAppointmentService';
+import AppointmentService from '../../services/appointmentService';
 import { useBooking } from '../../context/BookingContext';
 
 const { width } = Dimensions.get('window');
@@ -75,19 +76,44 @@ export default function DateTimeSelectionScreen() {
       setLoading(true);
       setLoadingLocal(true);
       
-      // Get branch hours from booking context or fetch from Firestore
-      // For now, we'll use a mock structure - in real implementation, fetch from Firestore
-      const mockHours = {
-        monday: { open: "09:00", close: "18:00", isOpen: true },
-        tuesday: { open: "09:00", close: "18:00", isOpen: true },
-        wednesday: { open: "09:00", close: "18:00", isOpen: true },
-        thursday: { open: "09:00", close: "18:00", isOpen: true },
-        friday: { open: "09:00", close: "18:00", isOpen: true },
-        saturday: { open: "09:00", close: "18:00", isOpen: true },
-        sunday: { open: "10:00", close: "16:00", isOpen: false }
-      };
+      // Fetch branch hours from Firestore using the proper collection structure
+      const { doc, getDoc } = await import('firebase/firestore');
+      const { db, COLLECTIONS } = await import('../../config/firebase');
       
-      setBranchHours(mockHours);
+      const branchDoc = await getDoc(doc(db, COLLECTIONS.BRANCHES, state.bookingData.branchId || ''));
+      
+      if (branchDoc.exists()) {
+        const branchData = branchDoc.data();
+        const operatingHours = branchData.operatingHours || branchData['operatingHours'] || {};
+        
+        // Ensure proper structure with all days
+        const defaultHours = {
+          monday: { open: "09:00", close: "18:00", isOpen: true },
+          tuesday: { open: "09:00", close: "18:00", isOpen: true },
+          wednesday: { open: "09:00", close: "18:00", isOpen: true },
+          thursday: { open: "09:00", close: "18:00", isOpen: true },
+          friday: { open: "09:00", close: "18:00", isOpen: true },
+          saturday: { open: "09:00", close: "18:00", isOpen: true },
+          sunday: { open: "10:00", close: "16:00", isOpen: false }
+        };
+        
+        // Merge with actual data, using defaults for missing days
+        const mergedHours = { ...defaultHours, ...operatingHours };
+        setBranchHours(mergedHours);
+      } else {
+        console.warn('Branch not found, using default hours');
+        // Use default hours if branch not found
+        const defaultHours = {
+          monday: { open: "09:00", close: "18:00", isOpen: true },
+          tuesday: { open: "09:00", close: "18:00", isOpen: true },
+          wednesday: { open: "09:00", close: "18:00", isOpen: true },
+          thursday: { open: "09:00", close: "18:00", isOpen: true },
+          friday: { open: "09:00", close: "18:00", isOpen: true },
+          saturday: { open: "09:00", close: "18:00", isOpen: true },
+          sunday: { open: "10:00", close: "16:00", isOpen: false }
+        };
+        setBranchHours(defaultHours);
+      }
     } catch (error) {
       console.error('Error loading branch hours:', error);
       setError('Failed to load branch hours');
@@ -116,11 +142,19 @@ export default function DateTimeSelectionScreen() {
     const startTime = openHour * 60 + openMinute;
     const endTime = closeHour * 60 + closeMinute;
     
+    // Get current time for today's date validation
+    const now = new Date();
+    const isToday = selectedDate === now.toISOString().split('T')[0];
+    const currentTimeInMinutes = now.getHours() * 60 + now.getMinutes();
+    
     for (let timeInMinutes = startTime; timeInMinutes < endTime; timeInMinutes += 30) {
       const hour = Math.floor(timeInMinutes / 60);
       const minute = timeInMinutes % 60;
       const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-      const isAvailable = !availabilityChecked[`${selectedDate}-${timeString}`];
+      
+      // Check if this time slot is in the past (only for today)
+      const isPastTime = isToday && timeInMinutes <= currentTimeInMinutes;
+      const isAvailable = !availabilityChecked[`${selectedDate}-${timeString}`] && !isPastTime;
       
       slots.push({
         id: timeInMinutes,
@@ -310,7 +344,7 @@ export default function DateTimeSelectionScreen() {
                         selectedTime === slot.time && styles.selectedTimeText,
                         !slot.isAvailable && styles.unavailableText
                       ]}>
-                        {slot.time}
+                        {AppointmentService.formatTime(slot.time)}
                       </Text>
                     </TouchableOpacity>
                     ))}
@@ -355,7 +389,7 @@ export default function DateTimeSelectionScreen() {
 
   // For mobile, use ScreenWrapper with header
   return (
-    <ScreenWrapper title="Book Appointment">
+    <ScreenWrapper title="Book Appointment" scrollable={false}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Progress Indicator */}
         <View style={styles.progressContainer}>
@@ -764,5 +798,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: FONTS.medium,
     color: '#666',
+  },
+  pastTimeSlot: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1D5DB',
+    opacity: 0.6,
+  },
+  pastTimeText: {
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  pastTimeLabel: {
+    fontSize: 10,
+    fontFamily: FONTS.medium,
+    color: '#EF4444',
+    marginTop: 2,
   },
 });

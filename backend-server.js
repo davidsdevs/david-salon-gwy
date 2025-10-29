@@ -4,6 +4,7 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
 const cors = require('cors');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = 3001;
@@ -80,6 +81,31 @@ app.get('/health', (req, res) => {
     message: 'Email server is running',
     timestamp: new Date().toISOString()
   });
+});
+
+// Cloudinary signature endpoint (for signed uploads)
+// Usage: POST /cloudinary-sign { params: { timestamp: 1234567890, folder: 'faithconnect' } }
+// It will return { signature: '...', timestamp: 1234567890 }
+app.post('/cloudinary-sign', (req, res) => {
+  try {
+    const { params } = req.body || {};
+    if (!params || typeof params !== 'object') {
+      return res.status(400).json({ error: 'Missing params' });
+    }
+
+    // Build the string to sign by sorting keys and concatenating as key=value&...
+    const keys = Object.keys(params).sort();
+    const toSign = keys.map((k) => `${k}=${params[k]}`).join('&');
+
+    // IMPORTANT: Replace with your actual secret in production via env var
+    const apiSecret = 'IbtgPhwuPWO6rho9O5BCdBazwTI';
+    const signature = crypto.createHash('sha1').update(toSign + apiSecret).digest('hex');
+
+    res.json({ signature });
+  } catch (err) {
+    console.error('❌ Error generating Cloudinary signature:', err);
+    res.status(500).json({ error: 'Failed to generate signature' });
+  }
 });
 
 // Start server

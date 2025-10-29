@@ -7,18 +7,31 @@ import {
   ScrollView,
   Platform,
   Alert,
+  Image,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import { useAuth } from '../../hooks/redux';
-import { APP_CONFIG, FONTS } from '../../constants';
+import { APP_CONFIG, FONTS, TYPOGRAPHY_STYLES } from '../../constants';
 import clearAllAppData from '../../utils/clearAllData';
 
 export default function ProfileScreen() {
   const { user, logout, isLoading } = useAuth();
   const navigation = useNavigation();
+
+  const handleEditProfile = () => {
+    (navigation as any).navigate('EditProfile');
+  };
+
+  const handleTransactionHistory = () => {
+    (navigation as any).navigate('TransactionHistory');
+  };
+
+  const handleNotificationSettings = () => {
+    (navigation as any).navigate('NotificationSettings');
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -65,22 +78,28 @@ export default function ProfileScreen() {
       id: 1,
       title: 'Edit Profile',
       icon: 'settings-outline',
-      onPress: () => console.log('Edit Profile'),
+      onPress: handleEditProfile,
     },
     {
       id: 2,
-      title: 'Notification Settings',
-      icon: 'notifications-outline',
-      onPress: () => console.log('Notification Settings'),
+      title: 'Transaction History',
+      icon: 'receipt-outline',
+      onPress: handleTransactionHistory,
     },
     {
       id: 3,
+      title: 'Notification Settings',
+      icon: 'notifications-outline',
+      onPress: handleNotificationSettings,
+    },
+    {
+      id: 4,
       title: 'Help & Support',
       icon: 'help-circle-outline',
       onPress: () => console.log('Help & Support'),
     },
     {
-      id: 4,
+      id: 5,
       title: 'About',
       icon: 'information-circle-outline',
       onPress: () => console.log('About'),
@@ -94,7 +113,16 @@ export default function ProfileScreen() {
         {/* Profile Header */}
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
-            <Ionicons name="person" size={40} color={APP_CONFIG.primaryColor} />
+            {user?.profilePicture ? (
+              <Image 
+                source={{ uri: user.profilePicture }} 
+                style={styles.profileImage}
+                resizeMode="cover"
+                onError={() => console.log('Failed to load profile picture')}
+              />
+            ) : (
+              <Ionicons name="person" size={40} color={APP_CONFIG.primaryColor} />
+            )}
           </View>
           <Text style={styles.userName}>{user?.name || 'Claire Cruz'}</Text>
           <Text style={styles.userEmail}>{user?.email || 'claire@example.com'}</Text>
@@ -137,12 +165,21 @@ export default function ProfileScreen() {
 
   // For mobile, use ScreenWrapper with header
   return (
-    <ScreenWrapper title="Profile">
+    <ScreenWrapper title="Profile" scrollable={false}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
-            <Ionicons name="person" size={40} color={APP_CONFIG.primaryColor} />
+            {user?.profilePicture ? (
+              <Image 
+                source={{ uri: user.profilePicture }} 
+                style={styles.profileImage}
+                resizeMode="cover"
+                onError={() => console.log('Failed to load profile picture')}
+              />
+            ) : (
+              <Ionicons name="person" size={40} color={APP_CONFIG.primaryColor} />
+            )}
           </View>
           <Text style={styles.userName}>{user?.name || 'Claire Cruz'}</Text>
           <Text style={styles.userEmail}>{user?.email || 'claire@example.com'}</Text>
@@ -217,18 +254,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+    overflow: 'hidden',
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
   },
   userName: {
-    fontSize: Platform.OS === 'web' ? 18 : Platform.OS === 'android' ? 20 : Platform.OS === 'ios' ? 22 : 24,
+    ...TYPOGRAPHY_STYLES.subheader,
     color: Platform.OS === 'web' ? 'rgb(17, 24, 39)' : APP_CONFIG.primaryColor,
     marginBottom: Platform.OS === 'web' ? 12 : 4,
-    fontFamily: Platform.OS === 'web' ? 'Poppins_600SemiBold' : FONTS.bold,
   },
   userEmail: {
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: APP_CONFIG.lightTextColor,
     marginBottom: 12,
-    fontFamily: FONTS.regular,
   },
   membershipBadge: {
     backgroundColor: APP_CONFIG.primaryColor,
@@ -237,8 +278,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   membershipText: {
+    ...TYPOGRAPHY_STYLES.tiny,
     color: '#FFFFFF',
-    fontSize: Platform.OS === 'android' ? 10 : Platform.OS === 'ios' ? 11 : 12,
     fontFamily: FONTS.bold,
   },
   optionsContainer: {
@@ -265,10 +306,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   optionText: {
-    fontSize: Platform.OS === 'web' ? 16 : 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: APP_CONFIG.primaryColor,
     marginLeft: 12,
-    fontFamily: FONTS.medium,
   },
   logoutButton: {
     backgroundColor: '#FF4444',
@@ -281,10 +321,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logoutText: {
+    ...TYPOGRAPHY_STYLES.button,
     color: '#FFFFFF',
-    fontSize: Platform.OS === 'web' ? 16 : 14,
     marginLeft: 8,
-    fontFamily: FONTS.semiBold,
   },
   logoutButtonDisabled: {
     backgroundColor: '#CCCCCC',

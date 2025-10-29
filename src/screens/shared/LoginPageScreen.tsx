@@ -47,7 +47,7 @@ export default function LoginPageScreen() {
         console.log('✅ Login successful, app will redirect automatically');
       } else if (result.type === 'auth/login/rejected') {
         // Login failed
-        Alert.alert('Login Failed', result.payload || 'Invalid credentials');
+        Alert.alert('Login Failed', typeof result.payload === 'string' ? result.payload : 'Invalid credentials');
       }
     } catch (error: any) {
       console.error('Login error:', error);
@@ -261,7 +261,7 @@ export default function LoginPageScreen() {
         {/* Register Link */}
         <View style={styles.registerContainer}>
           <Text style={styles.registerText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={() => console.log('Register')}>
+          <TouchableOpacity onPress={() => navigation.navigate('Register' as never)}>
             <Text style={styles.registerLink}>Register</Text>
           </TouchableOpacity>
         </View>

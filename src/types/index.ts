@@ -4,6 +4,7 @@ export type RootStackParamList = {
   Onboarding: undefined;
   Login: undefined;
   LoginPage: undefined;
+  Register: undefined;
   Main: undefined;
   MainTabs: undefined;
   StylistTabs: undefined;
@@ -15,6 +16,12 @@ export type RootStackParamList = {
   StylistEditProfile: undefined;
   StylistChangePassword: undefined;
   StylistClientDetails: { client: any };
+  ProductDetails: { product: Product };
+  AppointmentDetails: { appointment: Appointment };
+  TransactionDetails: { appointment: Appointment };
+  EditProfile: undefined;
+  TransactionHistory: undefined;
+  NotificationSettings: undefined;
 };
 
 export type MainTabParamList = {
@@ -59,31 +66,66 @@ export interface ScreenProps {
 // User types
 export interface User {
   id: string;
+  uid?: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
-  membershipLevel: 'Gold' | 'Platinum' | 'Silver';
-  points: number;
-  memberSince: string;
+  phone?: string;
+  profileImage?: string;
+  userType?: 'client' | 'stylist' | 'admin';
+  isActive?: boolean;
+  membershipLevel?: 'Gold' | 'Platinum' | 'Silver';
+  points?: number;
+  memberSince?: string;
+  roles?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // Appointment types
 export interface Appointment {
-  id: number;
-  service: string;
-  stylist: string;
-  date: string;
-  time: string;
-  location: string;
-  status: 'confirmed' | 'pending' | 'cancelled';
+  id: string | number;
+  service?: string;
+  stylist?: string;
+  date?: string;
+  time?: string;
+  startTime?: string;
+  endTime?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
+  duration?: number | string;
+  location?: string;
+  status?: 'confirmed' | 'pending' | 'cancelled' | 'scheduled' | 'completed' | 'in_progress' | 'no_show' | 'pending_reschedule';
+  // Additional compatibility fields
+  price?: number | string;
+  client?: string;
+  clientType?: string;
+  clientFirstName?: string;
+  clientLastName?: string;
+  clientPhone?: string;
+  clientEmail?: string;
 }
 
 // Product types
 export interface Product {
-  id: number;
+  id: string;
   name: string;
-  price: string;
+  description: string;
+  brand: string;
   category: string;
-  image?: string;
+  supplier: string;
+  imageUrl: string;
+  otcPrice: number;
+  salonUsePrice: number;
+  unitCost: number;
+  upc: string;
+  shelfLife: string;
+  variants: string;
+  status: string;
+  branches: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Reward types

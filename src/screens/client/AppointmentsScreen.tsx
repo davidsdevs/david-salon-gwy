@@ -7,50 +7,180 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
-  Modal,
-  Pressable,
   Alert,
   ActivityIndicator,
   RefreshControl,
-  Animated,
-  TextInput,
+  KeyboardAvoidingView,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../components/ScreenWrapper';
-import { APP_CONFIG, FONTS } from '../../constants';
+import { APP_CONFIG, FONTS, TYPOGRAPHY_STYLES } from '../../constants';
 import { Appointment } from '../../types/api';
 import { useAuth } from '../../hooks/redux';
 import AppointmentService from '../../services/appointmentService';
+import ServicePricingService from '../../services/servicePricingService';
+import { useServicePricing } from '../../hooks/useServicePricing';
 
 const { width } = Dimensions.get('window');
 const isIPhone = Platform.OS === 'ios';
 
 export default function AppointmentsScreen() {
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [rescheduleModalVisible, setRescheduleModalVisible] = useState(false);
-  
-  // Debug modal state changes
-  useEffect(() => {
-    console.log('🔄 Reschedule modal visibility changed:', rescheduleModalVisible);
-  }, [rescheduleModalVisible]);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [selectedTime, setSelectedTime] = useState<Date>(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [rescheduleNotes, setRescheduleNotes] = useState('');
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [branchNames, setBranchNames] = useState<{ [branchId: string]: string }>({});
   const [serviceNames, setServiceNames] = useState<{ [serviceId: string]: string }>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'upcoming' | 'past'>('upcoming');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [filter, setFilter] = useState<'upcoming' | 'past'>('upcoming');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const navigation = useNavigation();
   const { user } = useAuth();
+  const { servicePricing, loading: pricingLoading, calculateAppointmentTotal } = useServicePricing(user?.branchId || undefined);
+
+  // Helper function to calculate branch-specific price for an appointment
+  const calculateBranchSpecificPrice = (appointment: Appointment): number => {
+    console.log('🔍 Calculating price for appointment:', {
+      id: appointment.id,
+      totalPrice: appointment.totalPrice,
+      finalPrice: appointment.finalPrice,
+      price: appointment.price,
+      totalCost: (appointment as any).totalCost,
+      serviceStylistPairs: (appointment as any).serviceStylistPairs,
+      branchId: appointment.branchId,
+      appointmentDate: appointment.appointmentDate,
+      appointmentTime: appointment.appointmentTime,
+      status: appointment.status,
+      clientName: (appointment as any).clientName,
+      userBranchId: user?.branchId,
+      servicePricing: servicePricing
+    });
+    
+    // If we have serviceStylistPairs, calculate the total from individual services using branch-specific pricing
+    if ((appointment as any).serviceStylistPairs && Array.isArray((appointment as any).serviceStylistPairs)) {
+      const servicePairs = (appointment as any).serviceStylistPairs;
+      
+      console.log('🔍 Multiple services detected:', servicePairs.length, 'services');
+      
+      // Calculate individual service prices and total
+      const individualPrices = servicePairs.map((pair: any) => {
+        const price = getServicePrice(pair.serviceId);
+        console.log(`💰 Service ${pair.serviceId}: ₱${price}`);
+        return { serviceId: pair.serviceId, price };
+      });
+      
+      const totalPrice = calculateAppointmentTotal(servicePairs);
+      
+      // Enhanced logging for multiple services
+      console.log('💰 Individual service prices:', individualPrices);
+      console.log('💰 Service count:', servicePairs.length);
+      console.log('💰 Calculated TOTAL from serviceStylistPairs with branch pricing:', totalPrice);
+      console.log('💰 Sum verification:', individualPrices.reduce((sum: number, item: any) => sum + item.price, 0));
+      
+      return totalPrice;
+    }
+    
+    // Try multiple price fields in order of preference - prioritize totalPrice from Firestore
+    const price = appointment.totalPrice || 
+                  appointment.finalPrice || 
+                  appointment.price || 
+                  (appointment as any).totalCost || 
+                  0;
+    
+    console.log('💰 Calculated price:', price);
+    console.log('💰 Price breakdown:', {
+      totalPrice: appointment.totalPrice,
+      finalPrice: appointment.finalPrice,
+      price: appointment.price,
+      totalCost: (appointment as any).totalCost,
+      selectedPrice: price
+    });
+    return price;
+  };
+
+  // Helper function to get individual service price
+  const getServicePrice = (serviceId: string): number => {
+    return servicePricing[serviceId] || 0;
+  };
+
+  // Helper function to get service names from serviceStylistPairs
+  const getServiceNames = (appointment: Appointment): string => {
+    if (!appointment.serviceStylistPairs || appointment.serviceStylistPairs.length === 0) {
+      return 'Service';
+    }
+
+    if (appointment.serviceStylistPairs.length === 1) {
+      const firstPair = appointment.serviceStylistPairs[0];
+      return firstPair?.serviceName || 
+             serviceNames[firstPair?.serviceId || ''] || 
+             firstPair?.serviceId || 'Service';
+    }
+
+    // For multiple services, show the first few service names
+    const serviceNamesList = appointment.serviceStylistPairs
+      .slice(0, 2) // Show first 2 services
+      .map(pair => pair.serviceName || serviceNames[pair.serviceId] || pair.serviceId)
+      .filter(Boolean);
+    
+    if (serviceNamesList.length === 0) return 'Services';
+    
+    const displayText = serviceNamesList.join(', ');
+    const remainingCount = appointment.serviceStylistPairs.length - serviceNamesList.length;
+    
+    return remainingCount > 0 
+      ? `${displayText} +${remainingCount} more`
+      : displayText;
+  };
+
+  const getStylistNames = (appointment: Appointment): string => {
+    if (!appointment.serviceStylistPairs || appointment.serviceStylistPairs.length === 0) {
+      return 'Stylist';
+    }
+
+    if (appointment.serviceStylistPairs.length === 1) {
+      const firstPair = appointment.serviceStylistPairs[0];
+      return firstPair?.stylistName || 'Stylist';
+    }
+
+    // For multiple stylists, show the first few stylist names
+    const stylistNamesList = appointment.serviceStylistPairs
+      .slice(0, 2) // Show first 2 stylists
+      .map(pair => pair.stylistName || 'Stylist')
+      .filter(Boolean);
+    
+    if (stylistNamesList.length === 0) return 'Stylists';
+    
+    const displayText = stylistNamesList.join(', ');
+    const remainingCount = appointment.serviceStylistPairs.length - stylistNamesList.length;
+    
+    return remainingCount > 0 
+      ? `${displayText} +${remainingCount} more`
+      : displayText;
+  };
+
+  // Helper function to get detailed price breakdown for debugging
+  const getPriceBreakdown = (appointment: Appointment) => {
+    if ((appointment as any).serviceStylistPairs && Array.isArray((appointment as any).serviceStylistPairs)) {
+      const servicePairs = (appointment as any).serviceStylistPairs;
+      const breakdown = servicePairs.map((pair: any) => ({
+        serviceId: pair.serviceId,
+        serviceName: serviceNames[pair.serviceId] || pair.serviceId,
+        price: getServicePrice(pair.serviceId),
+        stylistId: pair.stylistId
+      }));
+      
+      const total = breakdown.reduce((sum: number, item: any) => sum + item.price, 0);
+      
+      console.log('💰 Price Breakdown:', {
+        appointmentId: appointment.id,
+        breakdown,
+        total,
+        serviceCount: servicePairs.length
+      });
+      
+      return { breakdown, total };
+    }
+    return { breakdown: [], total: 0 };
+  };
 
   // Load appointments on component mount and set up real-time subscription
   useEffect(() => {
@@ -72,13 +202,38 @@ export default function AppointmentsScreen() {
   }, [user?.id]);
 
 
+
+
+
   const loadAppointments = async () => {
     if (!user?.id) return;
     
     try {
       setLoading(true);
       const clientAppointments = await AppointmentService.getClientAppointments(user.id);
+      
+      // Enhanced debugging for appointment data structure
+      console.log('🔄 Loaded appointments:', clientAppointments.length);
+      console.log('📋 Appointment data structure:', clientAppointments.map(apt => ({
+        id: apt.id,
+        branchId: apt.branchId,
+        appointmentDate: apt.appointmentDate,
+        appointmentTime: apt.appointmentTime,
+        clientId: apt.clientId,
+        clientName: (apt as any).clientName,
+        clientEmail: (apt as any).clientEmail,
+        clientPhone: (apt as any).clientPhone,
+        notes: apt.notes,
+        status: apt.status,
+        totalPrice: apt.totalPrice,
+        serviceStylistPairs: (apt as any).serviceStylistPairs,
+        history: (apt as any).history,
+        createdAt: apt.createdAt,
+        updatedAt: apt.updatedAt
+      })));
+      
       setAppointments(clientAppointments);
+      
       
       // Fetch branch names for all unique branch IDs
       const uniqueBranchIds = [...new Set(clientAppointments.map(apt => apt.branchId).filter(Boolean))];
@@ -106,6 +261,7 @@ export default function AppointmentsScreen() {
     }
   };
 
+
   const setupRealtimeSubscription = () => {
     if (!user?.id) {
       console.log('⚠️ No user ID available for real-time subscription');
@@ -118,6 +274,9 @@ export default function AppointmentsScreen() {
       user.id,
       async (updatedAppointments) => {
         console.log('📡 Real-time update received:', updatedAppointments.length, 'appointments');
+        
+        // Removed active appointment check - users can now book multiple appointments
+        
         setAppointments(updatedAppointments);
         
         // Fetch branch names for new appointments
@@ -158,35 +317,22 @@ export default function AppointmentsScreen() {
     }, 1000);
   };
 
-  // Filter appointments based on selected filter and status
+  // Filter appointments based on selected filter
   const filteredAppointments = appointments.filter(appointment => {
     const appointmentDate = new Date(appointment.appointmentDate || appointment.date);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // First filter by date/time
-    let dateMatch = false;
     switch (filter) {
       case 'upcoming':
-        dateMatch = appointmentDate >= today;
-        break;
+        // Show appointments with status 'in_service', 'confirmed', or 'pending'
+        return ['in_service', 'confirmed', 'pending'].includes(appointment.status);
       case 'past':
-        dateMatch = appointmentDate < today;
-        break;
-      case 'all':
+        // Show appointments that are completed or cancelled
+        return ['completed', 'cancelled'].includes(appointment.status);
       default:
-        dateMatch = true;
+        return ['in_service', 'confirmed', 'pending'].includes(appointment.status);
     }
-
-    // Then filter by status
-    let statusMatch = false;
-    if (statusFilter === 'all') {
-      statusMatch = true;
-    } else {
-      statusMatch = appointment.status === statusFilter;
-    }
-
-    return dateMatch && statusMatch;
   });
 
   // Sort appointments by date and time (closest date first)
@@ -194,132 +340,41 @@ export default function AppointmentsScreen() {
     const dateA = new Date(`${a.appointmentDate || a.date} ${a.appointmentTime || a.startTime}`);
     const dateB = new Date(`${b.appointmentDate || b.date} ${b.appointmentTime || b.startTime}`);
     
-    // For upcoming appointments, show closest date first
+    // For upcoming appointments, sort by status priority first, then by date
     if (filter === 'upcoming') {
+      // Define status priority: pending = 1, confirmed = 2, in_service = 3
+      const getStatusPriority = (status: string) => {
+        switch (status) {
+          case 'pending': return 1;
+          case 'confirmed': return 2;
+          case 'in_service': return 3;
+          default: return 4;
+        }
+      };
+      
+      const statusPriorityA = getStatusPriority(a.status);
+      const statusPriorityB = getStatusPriority(b.status);
+      
+      // First sort by status priority
+      if (statusPriorityA !== statusPriorityB) {
+        return statusPriorityA - statusPriorityB;
+      }
+      
+      // If same status, sort by date (closest first)
       return dateA.getTime() - dateB.getTime();
     }
     // For past appointments, show most recent first
     else if (filter === 'past') {
       return dateB.getTime() - dateA.getTime();
     }
-    // For all appointments, show closest future date first, then past dates
-    else {
-      const now = new Date();
-      const aIsFuture = dateA >= now;
-      const bIsFuture = dateB >= now;
-      
-      if (aIsFuture && !bIsFuture) return -1; // A is future, B is past
-      if (!aIsFuture && bIsFuture) return 1;  // A is past, B is future
-      if (aIsFuture && bIsFuture) return dateA.getTime() - dateB.getTime(); // Both future, closest first
-      return dateB.getTime() - dateA.getTime(); // Both past, most recent first
-    }
+    return dateA.getTime() - dateB.getTime();
   });
 
-  const handleAppointmentPress = (appointment: Appointment) => {
-    setSelectedAppointment(appointment);
-    setModalVisible(true);
+  const handleAppointmentPress = async (appointment: Appointment) => {
+    // Navigate to AppointmentDetails screen instead of showing modal
+    (navigation as any).navigate('AppointmentDetails', { appointment });
   };
 
-  const handleCloseModal = () => {
-    setModalVisible(false);
-    setSelectedAppointment(null);
-  };
-
-  const handleReschedule = () => {
-    console.log('🔄 handleReschedule called, selectedAppointment:', selectedAppointment);
-    if (!selectedAppointment) {
-      console.log('❌ No selected appointment');
-      return;
-    }
-    
-    console.log('✅ Setting up reschedule modal for appointment:', selectedAppointment.id);
-    
-    // Set the initial date and time from the appointment
-    const appointmentDate = new Date(selectedAppointment.appointmentDate || selectedAppointment.date);
-    const appointmentTime = new Date(`${selectedAppointment.appointmentDate || selectedAppointment.date} ${selectedAppointment.appointmentTime || selectedAppointment.startTime}`);
-    
-    console.log('📅 Initial date/time:', {
-      appointmentDate: appointmentDate.toISOString(),
-      appointmentTime: appointmentTime.toISOString()
-    });
-    
-    setSelectedDate(appointmentDate);
-    setSelectedTime(appointmentTime);
-    setRescheduleNotes('');
-    setRescheduleModalVisible(true);
-    setModalVisible(false);
-    
-    console.log('✅ Reschedule modal should be visible now');
-  };
-
-  const handleRescheduleSubmit = async () => {
-    if (!selectedAppointment) return;
-    
-    try {
-      // Format the new date and time
-      const newDate = selectedDate.toISOString().split('T')[0];
-      const newTime = selectedTime?.toTimeString().split(' ')[0].substring(0, 5) || '00:00';
-      
-      console.log('🔄 Rescheduling appointment - Input data:', {
-        selectedDate: selectedDate.toISOString(),
-        selectedTime: selectedTime?.toISOString(),
-        appointmentId: selectedAppointment.id || 'unknown',
-        newDate,
-        newTime,
-        notes: rescheduleNotes
-      });
-      
-      // Update the appointment with new date/time
-      if (selectedAppointment.id) {
-        await AppointmentService.rescheduleAppointment(
-          selectedAppointment.id,
-          newDate,
-          newTime,
-          rescheduleNotes || ''
-        );
-      } else {
-        throw new Error('Appointment ID is missing');
-      }
-      
-      Alert.alert(
-        'Reschedule Request Submitted',
-        'Your reschedule request has been submitted. You will be placed in a queue and notified once confirmed.',
-        [{ text: 'OK', onPress: () => {
-          setRescheduleModalVisible(false);
-          setSelectedAppointment(null);
-        }}]
-      );
-    } catch (error) {
-      console.error('Error rescheduling appointment:', error);
-      Alert.alert('Error', 'Failed to reschedule appointment. Please try again.');
-    }
-  };
-
-  const handleCancel = () => {
-    if (!selectedAppointment) return;
-    
-    Alert.alert(
-      'Cancel Appointment',
-      'Are you sure you want to cancel this appointment? This action cannot be undone.',
-      [
-        { text: 'No', style: 'cancel' },
-        { 
-          text: 'Yes, Cancel', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await AppointmentService.cancelAppointment(selectedAppointment.id, 'Cancelled by client');
-              Alert.alert('Success', 'Appointment cancelled successfully');
-              handleCloseModal();
-            } catch (error) {
-              console.error('Error cancelling appointment:', error);
-              Alert.alert('Error', 'Failed to cancel appointment. Please try again.');
-            }
-          }
-        }
-      ]
-    );
-  };
 
   // For web, render without ScreenWrapper to avoid duplicate headers
   if (Platform.OS === 'web') {
@@ -345,53 +400,6 @@ export default function AppointmentsScreen() {
                 Past
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
-              onPress={() => setFilter('all')}
-            >
-              <Text style={[styles.filterButtonText, filter === 'all' && styles.filterButtonTextActive]}>
-                All
-              </Text>
-            </TouchableOpacity>
-          </View>
-          
-          {/* Status Filter */}
-          <View style={styles.statusFilterContainer}>
-            <Text style={styles.statusFilterLabel}>Status:</Text>
-            <View style={styles.statusFilterButtons}>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'all' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('all')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'all' && styles.statusFilterButtonTextActive]}>
-                  All
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'scheduled' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('scheduled')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'scheduled' && styles.statusFilterButtonTextActive]}>
-                  Scheduled
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'confirmed' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('confirmed')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'confirmed' && styles.statusFilterButtonTextActive]}>
-                  Confirmed
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'cancelled' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('cancelled')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'cancelled' && styles.statusFilterButtonTextActive]}>
-                  Cancelled
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
 
@@ -399,8 +407,7 @@ export default function AppointmentsScreen() {
         <View style={styles.sectionCard}>
           <View style={styles.sectionTitleContainer}>
             <Text style={styles.sectionTitle}>
-              {filter === 'upcoming' ? 'Upcoming Appointments' : 
-               filter === 'past' ? 'Past Appointments' : 'All Appointments'}
+              {filter === 'upcoming' ? 'Upcoming Appointments' : 'Past Appointments'}
             </Text>
           </View>
           
@@ -414,8 +421,7 @@ export default function AppointmentsScreen() {
               <Ionicons name="calendar-outline" size={48} color="#CCCCCC" />
               <Text style={styles.emptyText}>No appointments found</Text>
               <Text style={styles.emptySubtext}>
-                {filter === 'upcoming' ? 'You have no upcoming appointments' :
-                 filter === 'past' ? 'You have no past appointments' : 'You have no appointments yet'}
+                {filter === 'upcoming' ? 'You have no upcoming appointments' : 'You have no past appointments'}
               </Text>
             </View>
           ) : (
@@ -431,14 +437,10 @@ export default function AppointmentsScreen() {
                   </View>
                   <View style={styles.appointmentDetails}>
                     <Text style={styles.appointmentService}>
-                      {appointment.serviceStylistPairs && appointment.serviceStylistPairs.length > 1 
-                        ? `${appointment.serviceStylistPairs.length} Services`
-                        : serviceNames[appointment.serviceStylistPairs?.[0]?.serviceId || ''] || 
-                          appointment.serviceStylistPairs?.[0]?.serviceId || 'Service'
-                      }
+                      {getServiceNames(appointment)}
                     </Text>
                     <Text style={styles.appointmentStylist}>
-                      {appointment.stylist?.firstName || 'Stylist'} {appointment.stylist?.lastName || 'Name'}
+                      {getStylistNames(appointment)}
                     </Text>
                     <View style={styles.appointmentInfo}>
                       <View style={styles.appointmentInfoItem}>
@@ -457,7 +459,21 @@ export default function AppointmentsScreen() {
                   </View>
                 </View>
                 <View style={styles.appointmentRight}>
-                  <Text style={styles.priceText}>₱{appointment.finalPrice || appointment.price || 0}</Text>
+                  {/* Enhanced Price Display for Multiple Services */}
+                  {appointment.serviceStylistPairs && appointment.serviceStylistPairs.length > 1 ? (
+                    <View style={styles.multiServicePriceContainer}>
+                      <Text style={styles.totalPriceText}>
+                        ₱{(appointment.totalPrice || 0).toLocaleString()}
+                      </Text>
+                      <Text style={styles.serviceCountText}>
+                        Total for {appointment.serviceStylistPairs.length} services
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.priceText}>
+                      ₱{(appointment.totalPrice || 0).toLocaleString()}
+                    </Text>
+                  )}
                   <View style={[styles.statusBadge, { backgroundColor: AppointmentService.getStatusColor(appointment.status) }]}>
                     <Text style={styles.statusText}>
                       {AppointmentService.getStatusText(appointment.status)}
@@ -476,16 +492,20 @@ export default function AppointmentsScreen() {
   return (
     <View style={styles.mainContainer}>
       <ScreenWrapper title="Appointments">
-        <ScrollView 
-          style={styles.container} 
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
+        <KeyboardAvoidingView 
+          style={styles.container}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
+          <ScrollView 
+            style={styles.container} 
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+          >
         {/* Page Title */}
         <View style={styles.section}>
-          <Text style={styles.pageTitle}>My Appointments</Text>
         </View>
 
         {/* Filters Section */}
@@ -508,53 +528,6 @@ export default function AppointmentsScreen() {
                 Past
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
-              onPress={() => setFilter('all')}
-            >
-              <Text style={[styles.filterButtonText, filter === 'all' && styles.filterButtonTextActive]}>
-                All
-              </Text>
-            </TouchableOpacity>
-          </View>
-          
-          {/* Status Filter */}
-          <View style={styles.statusFilterContainer}>
-            <Text style={styles.statusFilterLabel}>Status:</Text>
-            <View style={styles.statusFilterButtons}>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'all' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('all')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'all' && styles.statusFilterButtonTextActive]}>
-                  All
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'scheduled' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('scheduled')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'scheduled' && styles.statusFilterButtonTextActive]}>
-                  Scheduled
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'confirmed' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('confirmed')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'confirmed' && styles.statusFilterButtonTextActive]}>
-                  Confirmed
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.statusFilterButton, statusFilter === 'cancelled' && styles.statusFilterButtonActive]}
-                onPress={() => setStatusFilter('cancelled')}
-              >
-                <Text style={[styles.statusFilterButtonText, statusFilter === 'cancelled' && styles.statusFilterButtonTextActive]}>
-                  Cancelled
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
 
@@ -562,8 +535,7 @@ export default function AppointmentsScreen() {
         <View style={styles.section}>
           <View style={styles.sectionTitleContainer}>
             <Text style={styles.sectionTitle}>
-              {filter === 'upcoming' ? 'Upcoming Appointments' : 
-               filter === 'past' ? 'Past Appointments' : 'All Appointments'}
+              {filter === 'upcoming' ? 'Upcoming Appointments' : 'Past Appointments'}
             </Text>
           </View>
           
@@ -577,8 +549,7 @@ export default function AppointmentsScreen() {
               <Ionicons name="calendar-outline" size={48} color="#CCCCCC" />
               <Text style={styles.emptyText}>No appointments found</Text>
               <Text style={styles.emptySubtext}>
-                {filter === 'upcoming' ? 'You have no upcoming appointments' :
-                 filter === 'past' ? 'You have no past appointments' : 'You have no appointments yet'}
+                {filter === 'upcoming' ? 'You have no upcoming appointments' : 'You have no past appointments'}
               </Text>
             </View>
           ) : (
@@ -594,14 +565,10 @@ export default function AppointmentsScreen() {
                   </View>
                   <View style={styles.appointmentDetails}>
                     <Text style={styles.appointmentService}>
-                      {appointment.serviceStylistPairs && appointment.serviceStylistPairs.length > 1 
-                        ? `${appointment.serviceStylistPairs.length} Services`
-                        : serviceNames[appointment.serviceStylistPairs?.[0]?.serviceId || ''] || 
-                          appointment.serviceStylistPairs?.[0]?.serviceId || 'Service'
-                      }
+                      {getServiceNames(appointment)}
                     </Text>
                     <Text style={styles.appointmentStylist}>
-                      {appointment.stylist?.firstName || 'Stylist'} {appointment.stylist?.lastName || 'Name'}
+                      {getStylistNames(appointment)}
                     </Text>
                     <View style={styles.appointmentInfo}>
                       <View style={styles.appointmentInfoItem}>
@@ -620,7 +587,21 @@ export default function AppointmentsScreen() {
                   </View>
                 </View>
                 <View style={styles.appointmentRight}>
-                  <Text style={styles.priceText}>₱{appointment.finalPrice || appointment.price || 0}</Text>
+                  {/* Enhanced Price Display for Multiple Services */}
+                  {appointment.serviceStylistPairs && appointment.serviceStylistPairs.length > 1 ? (
+                    <View style={styles.multiServicePriceContainer}>
+                      <Text style={styles.totalPriceText}>
+                        ₱{(appointment.totalPrice || 0).toLocaleString()}
+                      </Text>
+                      <Text style={styles.serviceCountText}>
+                        Total for {appointment.serviceStylistPairs.length} services
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.priceText}>
+                      ₱{(appointment.totalPrice || 0).toLocaleString()}
+                    </Text>
+                  )}
                   <View style={[styles.statusBadge, { backgroundColor: AppointmentService.getStatusColor(appointment.status) }]}>
                     <Text style={styles.statusText}>
                       {AppointmentService.getStatusText(appointment.status)}
@@ -632,244 +613,23 @@ export default function AppointmentsScreen() {
           )}
         </View>
 
-        {/* Appointment Details Modal */}
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={modalVisible}
-          onRequestClose={handleCloseModal}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Appointment Details</Text>
-                <TouchableOpacity onPress={handleCloseModal} style={styles.modalCloseButton}>
-                  <Ionicons name="close" size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-              
-              {selectedAppointment && (
-                <>
-                  <View style={styles.modalAppointmentCard}>
-                    <View style={styles.modalAppointmentLeft}>
-                      <View style={styles.modalAppointmentIcon}>
-                        <Ionicons name="calendar" size={24} color="#4A90E2" />
-                      </View>
-                      <View style={styles.modalAppointmentDetails}>
-                        <Text style={styles.modalAppointmentService}>
-                          {selectedAppointment.serviceStylistPairs && selectedAppointment.serviceStylistPairs.length > 1 
-                            ? `${selectedAppointment.serviceStylistPairs.length} Services`
-                            : serviceNames[selectedAppointment.serviceStylistPairs?.[0]?.serviceId || ''] || 
-                              selectedAppointment.serviceStylistPairs?.[0]?.serviceId || 'Service'
-                          }
-                        </Text>
-                        {selectedAppointment.serviceStylistPairs && selectedAppointment.serviceStylistPairs.length > 1 && (
-                          <Text style={styles.modalAppointmentServicesList}>
-                            {selectedAppointment.serviceStylistPairs.map(pair => 
-                              serviceNames[pair.serviceId] || pair.serviceId
-                            ).join(', ')}
-                          </Text>
-                        )}
-                        {selectedAppointment.serviceStylistPairs && selectedAppointment.serviceStylistPairs.length > 1 ? (
-                          <View style={styles.modalStylistsContainer}>
-                            <Text style={styles.modalStylistsTitle}>Services & Stylists:</Text>
-                            {selectedAppointment.serviceStylistPairs.map((pair, index) => (
-                              <Text key={index} style={styles.modalStylistItem}>
-                                • {serviceNames[pair.serviceId] || pair.serviceId}: Stylist {pair.stylistId}
-                              </Text>
-                            ))}
-                          </View>
-                        ) : (
-                          <Text style={styles.modalAppointmentStylist}>
-                            with {selectedAppointment.stylist?.firstName || 'Stylist'} {selectedAppointment.stylist?.lastName || 'Name'}
-                          </Text>
-                        )}
-                        <View style={styles.modalAppointmentInfo}>
-                          <View style={styles.modalAppointmentInfoItem}>
-                            <Ionicons name="time" size={16} color="#666" />
-                            <Text style={styles.modalAppointmentInfoText}>
-                              {AppointmentService.formatDate(selectedAppointment.appointmentDate)} at {AppointmentService.formatTime(selectedAppointment.appointmentTime)}
-                            </Text>
-                          </View>
-                          <View style={styles.modalAppointmentInfoItem}>
-                            <Ionicons name="location" size={16} color="#666" />
-                            <Text style={styles.modalAppointmentInfoText}>
-                              {branchNames[selectedAppointment.branchId || ''] || `Branch ${selectedAppointment.branchId || 'Unknown'}`}
-                            </Text>
-                          </View>
-                          {selectedAppointment.notes && (
-                            <View style={styles.modalAppointmentInfoItem}>
-                              <Ionicons name="document-text" size={16} color="#666" />
-                              <Text style={styles.modalAppointmentInfoText}>
-                                {selectedAppointment.notes}
-                              </Text>
-                            </View>
-                          )}
-                          {selectedAppointment.service?.price && (
-                            <View style={styles.modalAppointmentInfoItem}>
-                              <Ionicons name="card" size={16} color="#666" />
-                              <Text style={styles.modalAppointmentInfoText}>
-                                ₱{selectedAppointment.finalPrice || selectedAppointment.service.price}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    </View>
-                    <View style={styles.modalStatusBadge}>
-                      <View style={[styles.statusBadge, { backgroundColor: AppointmentService.getStatusColor(selectedAppointment.status) }]}>
-                        <Text style={styles.statusText}>
-                          {AppointmentService.getStatusText(selectedAppointment.status)}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                  
-                  <View style={styles.modalActions}>
-                    {selectedAppointment.status === 'scheduled' && !selectedAppointment.history?.some(h => h.action === 'rescheduled') && (
-                      <TouchableOpacity style={styles.modalRescheduleButton} onPress={handleReschedule}>
-                        <Ionicons name="calendar-outline" size={20} color="#FFFFFF" />
-                        <Text style={styles.modalRescheduleButtonText}>Reschedule</Text>
-                      </TouchableOpacity>
-                    )}
-                    {selectedAppointment.status === 'scheduled' && (
-                      <TouchableOpacity style={styles.modalCancelButton} onPress={handleCancel}>
-                        <Ionicons name="close-circle-outline" size={20} color="#160B53" />
-                        <Text style={styles.modalCancelButtonText}>Cancel</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </>
-              )}
-            </View>
-          </View>
-        </Modal>
-
-        {/* Reschedule Modal */}
-        <Modal
-          animationType="slide"
-          transparent={true}
-          visible={rescheduleModalVisible}
-          onRequestClose={() => setRescheduleModalVisible(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.rescheduleModalContent}>
-              <View style={styles.rescheduleModalHeader}>
-                <Text style={styles.rescheduleModalTitle}>Reschedule Appointment</Text>
-                <TouchableOpacity 
-                  onPress={() => setRescheduleModalVisible(false)} 
-                  style={styles.modalCloseButton}
-                >
-                  <Ionicons name="close" size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.rescheduleForm}>
-                <Text style={styles.rescheduleNote}>
-                  📋 You will be placed in a queue and notified once your reschedule request is confirmed.
-                </Text>
-                
-                {/* Date Selection */}
-                <View style={styles.rescheduleField}>
-                  <Text style={styles.rescheduleLabel}>New Date</Text>
-                  <TouchableOpacity 
-                    style={styles.rescheduleInput}
-                    onPress={() => setShowDatePicker(true)}
-                  >
-                    <Text style={styles.rescheduleInputText}>
-                      {selectedDate.toLocaleDateString()}
-                    </Text>
-                    <Ionicons name="calendar-outline" size={20} color="#666" />
-                  </TouchableOpacity>
-                </View>
-                
-                {/* Time Selection */}
-                <View style={styles.rescheduleField}>
-                  <Text style={styles.rescheduleLabel}>New Time</Text>
-                  <TouchableOpacity 
-                    style={styles.rescheduleInput}
-                    onPress={() => setShowTimePicker(true)}
-                  >
-                    <Text style={styles.rescheduleInputText}>
-                      {selectedTime.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                    </Text>
-                    <Ionicons name="time-outline" size={20} color="#666" />
-                  </TouchableOpacity>
-                </View>
-                
-                {/* Notes */}
-                <View style={styles.rescheduleField}>
-                  <Text style={styles.rescheduleLabel}>Notes (Optional)</Text>
-                  <TextInput
-                    style={styles.rescheduleTextArea}
-                    placeholder="Any additional notes for your reschedule request..."
-                    value={rescheduleNotes}
-                    onChangeText={setRescheduleNotes}
-                    multiline
-                    numberOfLines={3}
-                    textAlignVertical="top"
-                  />
-                </View>
-              </View>
-              
-              <View style={styles.rescheduleActions}>
-                <TouchableOpacity 
-                  style={styles.rescheduleCancelButton}
-                  onPress={() => setRescheduleModalVisible(false)}
-                >
-                  <Text style={styles.rescheduleCancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.rescheduleSubmitButton}
-                  onPress={handleRescheduleSubmit}
-                >
-                  <Text style={styles.rescheduleSubmitButtonText}>Submit Request</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-          
-          {/* Date Picker */}
-          {showDatePicker && (
-            <DateTimePicker
-              value={selectedDate}
-              mode="date"
-              display="default"
-              minimumDate={new Date()}
-              onChange={(event: any, selectedDate?: Date) => {
-                setShowDatePicker(false);
-                if (selectedDate) {
-                  setSelectedDate(selectedDate);
-                }
-              }}
-            />
-          )}
-          
-          {/* Time Picker */}
-          {showTimePicker && (
-            <DateTimePicker
-              value={selectedTime}
-              mode="time"
-              display="default"
-              onChange={(event: any, selectedTime?: Date) => {
-                setShowTimePicker(false);
-                if (selectedTime) {
-                  setSelectedTime(selectedTime);
-                }
-              }}
-            />
-          )}
-        </Modal>
       </ScrollView>
+      </KeyboardAvoidingView>
       </ScreenWrapper>
       
       {/* Floating Action Button */}
       <TouchableOpacity 
         style={styles.fab}
-        onPress={() => (navigation as any).navigate('Booking')}
+        onPress={() => {
+          (navigation as any).navigate('Booking');
+        }}
         activeOpacity={0.8}
       >
-        <Ionicons name="add" size={24} color="#FFFFFF" />
+        <Ionicons 
+          name="add" 
+          size={24} 
+          color="#FFFFFF" 
+        />
       </TouchableOpacity>
     </View>
   );
@@ -894,15 +654,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   pageTitle: {
-    fontSize: Platform.OS === 'web' ? 25 : Platform.OS === 'ios' ? 18 : Platform.OS === 'android' ? 16 : 20,
-    color: '#160B53',
-    fontFamily: 'Poppins_700Bold',
+    ...TYPOGRAPHY_STYLES.header,
     marginBottom: Platform.OS === 'web' ? 16 : 4,
   },
   pageSubtitle: {
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#6B7280',
-    fontFamily: 'Poppins_400Regular',
   },
   sectionCard: {
     backgroundColor: '#FFFFFF',
@@ -926,9 +683,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: Platform.OS === 'web' ? 16 : Platform.OS === 'ios' ? 15 : Platform.OS === 'android' ? 14 : 16,
-    color: '#160B53',
-    fontFamily: 'Poppins_600SemiBold',
+    ...TYPOGRAPHY_STYLES.sectionTitle,
     marginBottom: 16,
   },
   appointmentCard: {
@@ -968,16 +723,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   appointmentService: {
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
-    color: '#160B53',
+    ...TYPOGRAPHY_STYLES.body,
+    fontFamily: FONTS.semiBold,
     marginBottom: 4,
-    fontFamily: Platform.OS === 'web' ? FONTS.medium : 'Poppins_600SemiBold',
   },
   appointmentStylist: {
-    fontSize: Platform.OS === 'android' ? 12 : Platform.OS === 'ios' ? 13 : 14,
-    color: '#666',
+    ...TYPOGRAPHY_STYLES.label,
     marginBottom: 8,
-    fontFamily: 'Poppins_400Regular',
   },
   appointmentInfo: {
     gap: 4,
@@ -987,19 +739,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   appointmentInfoText: {
-    fontSize: Platform.OS === 'android' ? 10 : Platform.OS === 'ios' ? 11 : 12,
-    color: '#666',
+    ...TYPOGRAPHY_STYLES.caption,
     marginLeft: 6,
-    fontFamily: 'Poppins_400Regular',
   },
   appointmentRight: {
     alignItems: 'flex-end',
   },
   priceText: {
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
-    color: '#160B53',
-    fontFamily: 'Poppins_700Bold',
+    ...TYPOGRAPHY_STYLES.price,
     marginBottom: 8,
+  },
+  multiServicePriceContainer: {
+    alignItems: 'flex-end',
+    marginBottom: 8,
+  },
+  totalPriceText: {
+    ...TYPOGRAPHY_STYLES.price,
+    marginBottom: 2,
+  },
+  serviceCountText: {
+    ...TYPOGRAPHY_STYLES.caption,
+  },
+  summaryText: {
+    ...TYPOGRAPHY_STYLES.tiny,
+    color: '#999',
+    fontStyle: 'italic',
+  },
+  debugText: {
+    ...TYPOGRAPHY_STYLES.tiny,
+    color: '#FF6B6B',
+    fontStyle: 'italic',
   },
   statusBadge: {
     paddingHorizontal: 8,
@@ -1007,153 +776,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusText: {
-    color: '#FFFFFF',
-    fontSize: Platform.OS === 'android' ? 8 : Platform.OS === 'ios' ? 9 : 10,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  // Modal styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 24,
-    width: width * 0.9,
-    maxWidth: 400,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#160B53',
-    fontFamily: 'Poppins_700Bold',
-  },
-  modalCloseButton: {
-    padding: 4,
-  },
-  modalAppointmentCard: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalAppointmentLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalAppointmentIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E3F2FD',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  modalAppointmentDetails: {
-    flex: 1,
-  },
-  modalAppointmentService: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#160B53',
-    marginBottom: 4,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  modalAppointmentServicesList: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 8,
-    fontFamily: 'Poppins_400Regular',
-    fontStyle: 'italic',
-  },
-  modalAppointmentStylist: {
-    fontSize: 16,
-    color: '#666666',
-    marginBottom: 12,
-    fontFamily: 'Poppins_400Regular',
-  },
-  modalStylistsContainer: {
-    marginBottom: 12,
-  },
-  modalStylistsTitle: {
-    fontSize: 16,
-    color: '#160B53',
-    fontWeight: '600',
-    marginBottom: 8,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  modalStylistItem: {
-    fontSize: 14,
-    color: '#666666',
-    marginBottom: 4,
-    fontFamily: 'Poppins_400Regular',
-  },
-  modalAppointmentInfo: {
-    gap: 8,
-  },
-  modalAppointmentInfoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  modalAppointmentInfoText: {
-    fontSize: 14,
-    color: '#666666',
-    fontFamily: 'Poppins_400Regular',
-  },
-  modalStatusBadge: {
-    alignItems: 'flex-end',
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  modalRescheduleButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4A90E2',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    gap: 8,
-  },
-  modalRescheduleButtonText: {
-    color: '#FFFFFF',
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  modalCancelButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#160B53',
-    gap: 8,
-  },
-  modalCancelButtonText: {
-    color: '#160B53',
-    fontSize: Platform.OS === 'android' ? 14 : Platform.OS === 'ios' ? 15 : 16,
-    fontFamily: 'Poppins_600SemiBold',
+    ...TYPOGRAPHY_STYLES.status,
   },
   // Filter styles
   filterContainer: {
@@ -1175,9 +798,9 @@ const styles = StyleSheet.create({
     borderColor: '#160B53',
   },
   filterButtonText: {
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#666666',
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: FONTS.medium,
   },
   filterButtonTextActive: {
     color: '#FFFFFF',
@@ -1188,11 +811,11 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   statusFilterLabel: {
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     fontWeight: '600',
     color: '#160B53',
     marginBottom: 8,
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: FONTS.semiBold,
   },
   statusFilterButtons: {
     flexDirection: 'row',
@@ -1212,9 +835,9 @@ const styles = StyleSheet.create({
     borderColor: '#4A90E2',
   },
   statusFilterButtonText: {
-    fontSize: 12,
+    ...TYPOGRAPHY_STYLES.label,
     color: '#666666',
-    fontFamily: 'Poppins_500Medium',
+    fontFamily: FONTS.medium,
   },
   statusFilterButtonTextActive: {
     color: '#FFFFFF',
@@ -1227,9 +850,8 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#666666',
-    fontFamily: 'Poppins_400Regular',
   },
   emptyContainer: {
     alignItems: 'center',
@@ -1238,15 +860,13 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: 16,
-    fontSize: 16,
+    ...TYPOGRAPHY_STYLES.sectionTitle,
     color: '#666666',
-    fontFamily: 'Poppins_600SemiBold',
   },
   emptySubtext: {
     marginTop: 8,
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#999999',
-    fontFamily: 'Poppins_400Regular',
     textAlign: 'center',
   },
   // Enhanced Card Layout Styles
@@ -1265,36 +885,18 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   serviceTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    ...TYPOGRAPHY_STYLES.subheader,
     color: '#1F2937',
-    fontFamily: 'Poppins_700Bold',
     marginBottom: 4,
   },
   serviceSubtitle: {
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#6B7280',
-    fontFamily: 'Poppins_400Regular',
     fontStyle: 'italic',
   },
   cardContent: {
     padding: 24,
     paddingTop: 20,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  appointmentInfo: {
-    gap: 6,
-    marginTop: 4,
   },
   infoRow: {
     flexDirection: 'row',
@@ -1312,17 +914,16 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   infoLabel: {
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     fontWeight: '600',
     color: '#374151',
-    fontFamily: 'Poppins_600SemiBold',
+    fontFamily: FONTS.semiBold,
     minWidth: 80,
     marginRight: 8,
   },
   infoValue: {
-    fontSize: 14,
+    ...TYPOGRAPHY_STYLES.bodySmall,
     color: '#1F2937',
-    fontFamily: 'Poppins_400Regular',
     flex: 1,
   },
   cardActions: {
@@ -1346,10 +947,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   rescheduleButtonText: {
+    ...TYPOGRAPHY_STYLES.button,
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'Poppins_600SemiBold',
   },
   cancelButton: {
     flex: 1,
@@ -1363,10 +962,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cancelButtonText: {
+    ...TYPOGRAPHY_STYLES.button,
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'Poppins_600SemiBold',
   },
   // Floating Action Button
   fab: {
@@ -1388,107 +985,5 @@ const styles = StyleSheet.create({
     shadowRadius: 4.65,
     elevation: 8,
     zIndex: 1000,
-  },
-  // Reschedule Modal Styles
-  rescheduleModalContent: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 24,
-    width: width * 0.95,
-    maxWidth: 500,
-    maxHeight: '90%',
-  },
-  rescheduleModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  rescheduleModalTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#160B53',
-    fontFamily: 'Poppins_700Bold',
-  },
-  rescheduleForm: {
-    marginBottom: 24,
-  },
-  rescheduleNote: {
-    fontSize: 14,
-    color: '#4A90E2',
-    backgroundColor: '#E3F2FD',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 20,
-    fontFamily: 'Poppins_400Regular',
-    lineHeight: 20,
-  },
-  rescheduleField: {
-    marginBottom: 20,
-  },
-  rescheduleLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#160B53',
-    marginBottom: 8,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  rescheduleInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  rescheduleInputText: {
-    fontSize: 16,
-    color: '#160B53',
-    fontFamily: 'Poppins_400Regular',
-  },
-  rescheduleTextArea: {
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#160B53',
-    fontFamily: 'Poppins_400Regular',
-    minHeight: 80,
-  },
-  rescheduleActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  rescheduleCancelButton: {
-    flex: 1,
-    backgroundColor: '#F8F9FA',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  rescheduleCancelButtonText: {
-    fontSize: 16,
-    color: '#666666',
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  rescheduleSubmitButton: {
-    flex: 1,
-    backgroundColor: APP_CONFIG.primaryColor,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  rescheduleSubmitButtonText: {
-    fontSize: 16,
-    color: '#FFFFFF',
-    fontFamily: 'Poppins_600SemiBold',
   },
 });

@@ -41,10 +41,10 @@ export class AppointmentService {
       const querySnapshot = await getDocs(branchesRef);
       
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
+        const data: any = doc.data();
         if (branchIds.includes(doc.id)) {
-          branchNames[doc.id] = data.name || 'Unknown Branch';
-          console.log(`✅ Found branch: ${doc.id} -> ${data.name}`);
+          branchNames[doc.id] = data['name'] || data.name || 'Unknown Branch';
+          console.log(`✅ Found branch: ${doc.id} -> ${data['name'] || data.name}`);
         }
       });
       
@@ -53,6 +53,28 @@ export class AppointmentService {
     } catch (error) {
       console.error('❌ Error fetching branch names:', error);
       return {};
+    }
+  }
+
+  // Helper function to get branch-specific price for a service
+  static getBranchSpecificPrice(service: any, branchId: string): number {
+    try {
+      // If service has prices and branches arrays, find the matching price
+      if (service.prices && service.branches && Array.isArray(service.prices) && Array.isArray(service.branches) && service.branches.length > 0) {
+        // Additional safety check before calling indexOf
+        if (typeof branchId === 'string' && branchId.trim() !== '') {
+          const branchIndex = service.branches.indexOf(branchId);
+          if (branchIndex !== -1 && service.prices[branchIndex] !== undefined) {
+            return service.prices[branchIndex];
+          }
+        }
+      }
+      
+      // Fallback to default price
+      return service.price || 0;
+    } catch (error) {
+      console.error('Error getting branch-specific price:', error);
+      return service.price || 0;
     }
   }
 
@@ -72,10 +94,10 @@ export class AppointmentService {
       const querySnapshot = await getDocs(servicesRef);
       
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
+        const data: any = doc.data();
         if (serviceIds.includes(doc.id)) {
-          serviceNames[doc.id] = data.name || 'Unknown Service';
-          console.log(`✅ Found service: ${doc.id} -> ${data.name}`);
+          serviceNames[doc.id] = data['name'] || data.name || 'Unknown Service';
+          console.log(`✅ Found service: ${doc.id} -> ${data['name'] || data.name}`);
         }
       });
       
@@ -92,216 +114,36 @@ export class AppointmentService {
     try {
       console.log('🔍 Fetching appointments for clientId:', clientId);
       const appointmentsRef = collection(db, this.COLLECTION_NAME);
-      
-      // Try both clientId and uid fields to handle different data structures
-      const queries = [
-        query(appointmentsRef, where('clientId', '==', clientId)),
-        query(appointmentsRef, where('uid', '==', clientId)),
-        query(appointmentsRef, where('userId', '==', clientId))
-      ];
-      
-      const allAppointments: Appointment[] = [];
-      
-      for (const q of queries) {
+
+      // Query appointments where clientId matches
+      const q = query(appointmentsRef, where('clientId', '==', clientId), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      const appointments: Appointment[] = [];
+
+      for (const docSnapshot of snapshot.docs) {
         try {
-          console.log('🔍 Executing query...');
-          const snapshot = await getDocs(q);
-          console.log('📊 Query returned', snapshot.docs.length, 'documents');
-          
-          for (const docSnapshot of snapshot.docs) {
-            try {
-              console.log('🔄 Processing document:', docSnapshot.id);
-              const appointmentData = docSnapshot.data() as FirestoreAppointment;
-              console.log('📋 Raw appointment data:', {
-                id: docSnapshot.id,
-                clientId: appointmentData.clientId,
-                appointmentDate: appointmentData.appointmentDate,
-                appointmentTime: appointmentData.appointmentTime,
-                serviceIds: appointmentData.serviceIds,
-                status: appointmentData.status
-              });
-              
-              const appointment = await this.mapFirestoreToAppointment(appointmentData, docSnapshot.id);
-              console.log('✅ Mapped appointment:', {
-                id: appointment.id,
-                serviceIds: appointment.serviceIds,
-                appointmentDate: appointment.appointmentDate,
-                appointmentTime: appointment.appointmentTime,
-                status: appointment.status
-              });
-              
-              allAppointments.push(appointment);
-            } catch (mappingError) {
-              console.error('❌ Error mapping appointment:', docSnapshot.id, mappingError);
-              // Continue with other appointments
-            }
-          }
-        } catch (queryError) {
-          console.log('⚠️ Query failed, trying next:', queryError);
+          const data = docSnapshot.data() as FirestoreAppointment;
+          const appointment = await this.mapFirestoreToAppointment(data, docSnapshot.id);
+          appointments.push(appointment);
+        } catch (error) {
+          console.error('❌ Error mapping appointment doc:', docSnapshot.id, error);
         }
       }
 
-      console.log('📊 Total appointments found:', allAppointments.length);
-
-      // Remove duplicates based on appointment ID
-      const uniqueAppointments = allAppointments.filter((appointment, index, self) => 
-        index === self.findIndex(a => a.id === appointment.id)
-      );
-
-      console.log('📊 Unique appointments after deduplication:', uniqueAppointments.length);
-
-      // Sort client-side to avoid composite index requirement
-      const sortedAppointments = uniqueAppointments.sort((a, b) => {
-        // Use new date fields with fallbacks
-        const dateA = new Date(a.appointmentDate || a.date);
-        const dateB = new Date(b.appointmentDate || b.date);
-        if (dateA.getTime() !== dateB.getTime()) {
-          return dateB.getTime() - dateA.getTime();
-        }
-        // If dates are equal, sort by time (descending)
-        const timeA = a.appointmentTime || a.startTime;
-        const timeB = b.appointmentTime || b.startTime;
+      // Sort by date/time descending to keep newest first
+      appointments.sort((a, b) => {
+        const dateA = new Date(a.appointmentDate || a.date || '');
+        const dateB = new Date(b.appointmentDate || b.date || '');
+        if (dateA.getTime() !== dateB.getTime()) return dateB.getTime() - dateA.getTime();
+        const timeA = a.appointmentTime || a.startTime || '';
+        const timeB = b.appointmentTime || b.startTime || '';
         return timeB.localeCompare(timeA);
       });
 
-      console.log('✅ Returning', sortedAppointments.length, 'appointments');
-      return sortedAppointments;
+      return appointments;
     } catch (error) {
       console.error('❌ Error fetching client appointments:', error);
-      console.error('❌ Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      throw new Error('Failed to fetch appointments');
-    }
-  }
-
-  // Get appointment by ID
-  static async getAppointmentById(appointmentId: string): Promise<Appointment | null> {
-    try {
-      const appointmentDoc = await getDoc(doc(db, this.COLLECTION_NAME, appointmentId));
-      
-      if (appointmentDoc.exists()) {
-        const appointmentData = appointmentDoc.data() as FirestoreAppointment;
-        return await this.mapFirestoreToAppointment(appointmentData, appointmentDoc.id);
-      }
-      
-      return null;
-    } catch (error) {
-      console.error('Error fetching appointment:', error);
-      throw new Error('Failed to fetch appointment');
-    }
-  }
-
-  // Create new appointment
-  static async createAppointment(appointmentData: Partial<Appointment>): Promise<string> {
-    try {
-      const appointmentRef = collection(db, this.COLLECTION_NAME);
-      const docRef = await addDoc(appointmentRef, {
-        ...appointmentData,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-      
-      return docRef.id;
-    } catch (error) {
-      console.error('Error creating appointment:', error);
-      throw new Error('Failed to create appointment');
-    }
-  }
-
-  // Update appointment
-  static async updateAppointment(appointmentId: string, updates: Partial<Appointment>): Promise<void> {
-    try {
-      const appointmentRef = doc(db, this.COLLECTION_NAME, appointmentId);
-      await updateDoc(appointmentRef, {
-        ...updates,
-        updatedAt: Timestamp.now(),
-      });
-    } catch (error) {
-      console.error('Error updating appointment:', error);
-      throw new Error('Failed to update appointment');
-    }
-  }
-
-  // Cancel appointment
-  static async cancelAppointment(appointmentId: string, reason: string): Promise<void> {
-    try {
-      const appointmentRef = doc(db, this.COLLECTION_NAME, appointmentId);
-      await updateDoc(appointmentRef, {
-        status: 'cancelled',
-        cancellationReason: reason,
-        updatedAt: Timestamp.now(),
-      });
-    } catch (error) {
-      console.error('Error cancelling appointment:', error);
-      throw new Error('Failed to cancel appointment');
-    }
-  }
-
-  // Reschedule appointment
-  static async rescheduleAppointment(
-    appointmentId: string, 
-    newDate: string, 
-    newTime: string, 
-    notes: string = ''
-  ): Promise<void> {
-    try {
-      console.log('🔄 Rescheduling appointment:', appointmentId, 'to', newDate, newTime);
-      const appointmentRef = doc(db, this.COLLECTION_NAME, appointmentId);
-      
-      // Get current appointment data to access history
-      const appointmentDoc = await getDoc(appointmentRef);
-      const currentData = appointmentDoc.data();
-      
-      if (!currentData) {
-        throw new Error('Appointment not found');
-      }
-      
-      // Create history entry for reschedule
-      const historyEntry = {
-        action: 'rescheduled',
-        timestamp: new Date().toISOString(),
-        oldDate: currentData.appointmentDate || currentData.date,
-        oldTime: currentData.appointmentTime || currentData.startTime,
-        newDate: newDate,
-        newTime: newTime,
-        notes: notes,
-        rescheduledBy: 'client'
-      };
-      
-      // Add to existing history array
-      const existingHistory = currentData.history || [];
-      const updatedHistory = [...existingHistory, historyEntry];
-      
-      const updateData = {
-        appointmentDate: newDate,
-        appointmentTime: newTime,
-        date: newDate,
-        startTime: newTime,
-        status: 'scheduled', // Keep as scheduled, not pending_reschedule
-        notes: notes, // Update notes field instead of rescheduleNotes
-        history: updatedHistory,
-        updatedAt: Timestamp.now(),
-      };
-      
-      console.log('📝 Updating appointment with data:', updateData);
-      console.log('📊 History entry:', historyEntry);
-      
-      // Update the appointment with new date/time and history
-      await updateDoc(appointmentRef, updateData);
-      
-      console.log('✅ Appointment rescheduled successfully with history logged');
-    } catch (error) {
-      console.error('❌ Error rescheduling appointment:', error);
-      console.error('❌ Error details:', {
-        appointmentId,
-        newDate,
-        newTime,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      throw new Error('Failed to reschedule appointment');
+      return [];
     }
   }
 
@@ -362,7 +204,7 @@ export class AppointmentService {
 
   // Helper method to map Firestore data to API format
   private static async mapFirestoreToAppointment(
-    firestoreData: FirestoreAppointment, 
+    firestoreData: any,
     docId: string
   ): Promise<Appointment> {
     try {
@@ -389,9 +231,9 @@ export class AppointmentService {
             // Fetch from users collection using the stylistId (which is the uid)
             const userDoc = await getDoc(doc(db, 'users', firstPair.stylistId));
             if (userDoc.exists()) {
-              const userData = userDoc.data();
-              stylistFirstName = userData.firstName || 'Stylist';
-              stylistLastName = userData.lastName || 'Name';
+              const userData: any = userDoc.data();
+              stylistFirstName = userData['firstName'] || userData.firstName || 'Stylist';
+              stylistLastName = userData['lastName'] || userData.lastName || 'Name';
               stylistName = `${stylistFirstName} ${stylistLastName}`;
               console.log('✅ Found stylist name from users collection:', stylistName);
             }
@@ -401,10 +243,10 @@ export class AppointmentService {
         }
       }
       
-      // For now, skip fetching other related data to avoid errors
-      let serviceData = null;
-      let stylistData = null;
-      let branchData = null;
+  // For now, skip fetching other related data to avoid errors
+  let serviceData: any = null;
+  let stylistData: any = null;
+  let branchData: any = null;
       
       console.log('⚠️ Skipping other related data fetch for now to focus on basic appointment display');
 
@@ -422,10 +264,35 @@ export class AppointmentService {
       const firstService = firestoreData.services && firestoreData.services.length > 0 ? firestoreData.services[0] : null;
       const firstStylist = firestoreData.stylists && firestoreData.stylists.length > 0 ? firestoreData.stylists[0] : null;
       
-      // Calculate total cost from services array
-      const totalCost = firestoreData.services ? 
-        firestoreData.services.reduce((sum, service) => sum + (service.price || 0), 0) : 
-        (firestoreData.totalCost || firestoreData.price || 0);
+      // Calculate total cost - prioritize totalPrice from Firestore, then other price fields
+      let totalCost = firestoreData.totalPrice || 
+                     firestoreData.totalCost || 
+                     firestoreData.finalPrice || 
+                     firestoreData.price || 0;
+      
+      // If we have a services array, calculate from individual services
+      if (Array.isArray(firestoreData.services) && firestoreData.services.length > 0) {
+        totalCost = firestoreData.services.reduce((sum: number, service: any) => sum + (service.price || 0), 0);
+      }
+      
+      // If still no price and we have serviceStylistPairs, use default pricing
+      if (totalCost === 0 && firestoreData.serviceStylistPairs && Array.isArray(firestoreData.serviceStylistPairs)) {
+        // Use a more realistic default price per service
+        totalCost = firestoreData.serviceStylistPairs.length * 200; // Default 200 per service
+      }
+      
+      console.log('💰 Price calculation debug:', {
+        hasServicesArray: Array.isArray(firestoreData.services),
+        servicesLength: firestoreData.services?.length || 0,
+        hasServiceStylistPairs: Array.isArray(firestoreData.serviceStylistPairs),
+        serviceStylistPairsLength: firestoreData.serviceStylistPairs?.length || 0,
+        totalCost,
+        firestoreTotalPrice: firestoreData.totalPrice,
+        firestoreTotalCost: firestoreData.totalCost,
+        firestorePrice: firestoreData.price,
+        finalPrice: firestoreData.finalPrice,
+        calculatedTotalCost: totalCost
+      });
 
       // Get primary stylist and service from serviceStylistPairs
       let primaryStylistId = '';
@@ -456,6 +323,7 @@ export class AppointmentService {
         price: totalCost,
         discount: firestoreData.discount || 0,
         finalPrice: firestoreData.finalPrice || totalCost,
+        totalPrice: firestoreData.totalPrice || totalCost,
         paymentStatus: firestoreData.paymentStatus || 'pending',
         paymentMethod: firestoreData.paymentMethod || 'cash',
         createdAt: firestoreData.createdAt?.toDate().toISOString() || new Date().toISOString(),
@@ -503,9 +371,11 @@ export class AppointmentService {
         branch: branchData || {
           id: firestoreData.branchId,
           name: `Branch ${firestoreData.branchId}`,
-          address: '',
+          address: '' as any,
           phone: '',
           email: '',
+          workingHours: {},
+          managerId: '',
           isActive: true,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -537,7 +407,9 @@ export class AppointmentService {
           description: serviceData.description,
           price: serviceData.price,
           duration: serviceData.duration,
-          category: serviceData.category,
+          category: (serviceData as any).category || serviceData.categoryId || '',
+          requiresStylist: serviceData.requiresStylist ?? true,
+          maxConcurrent: serviceData.maxConcurrent ?? 1,
           isActive: serviceData.isActive,
           createdAt: serviceData.createdAt?.toDate().toISOString() || new Date().toISOString(),
           updatedAt: serviceData.updatedAt?.toDate().toISOString() || new Date().toISOString(),
@@ -560,16 +432,21 @@ export class AppointmentService {
         const stylistData = stylistDoc.data() as FirestoreStylist;
         return {
           id: stylistDoc.id,
-          firstName: stylistData.firstName,
-          lastName: stylistData.lastName,
-          email: stylistData.email,
-          phone: stylistData.phone,
+          firstName: stylistData.firstName || '',
+          lastName: stylistData.lastName || '',
+          email: stylistData.email || '',
+          phone: stylistData.phone || '',
           specialization: stylistData.specialization || [],
           experience: stylistData.experience || 0,
           rating: stylistData.rating || 0,
           totalClients: stylistData.totalClients || 0,
           totalEarnings: stylistData.totalEarnings || 0,
           isAvailable: stylistData.isAvailable ?? true,
+          userType: 'stylist',
+          employeeId: (stylistData as any).employeeId || '',
+          uid: stylistDoc.id,
+          roles: (stylistData as any).roles || [],
+          isActive: stylistData.isActive ?? true,
           workingHours: stylistData.workingHours || {},
           services: stylistData.services || [],
           createdAt: stylistData.createdAt?.toDate().toISOString() || new Date().toISOString(),
@@ -597,8 +474,9 @@ export class AppointmentService {
           address: branchData.address,
           phone: branchData.phone,
           email: branchData.email,
-          managerId: branchData.managerId,
+          managerId: branchData.managerId || '',
           isActive: branchData.isActive ?? true,
+          workingHours: branchData.workingHours || {},
           createdAt: branchData.createdAt?.toDate().toISOString() || new Date().toISOString(),
           updatedAt: branchData.updatedAt?.toDate().toISOString() || new Date().toISOString(),
         };
@@ -677,15 +555,18 @@ export class AppointmentService {
         console.log('✅ Returning yellow for scheduled');
         return '#FFC107'; // Yellow
       case 'confirmed':
-        return '#4CAF50'; // Green
-      case 'completed':
         return '#2196F3'; // Blue
-      case 'pending_reschedule':
-        return '#FF9800'; // Orange
+      case 'completed':
+        return '#4CAF50'; // Green
+      case 'paid':
+        return '#4CAF50'; // Green (same as completed)
+      // Treat any legacy 'pending_reschedule' as its current status color; do not special-case
       case 'pending':
-        return '#FF9800';
+        return '#FFC107'; // Yellow
       case 'in_progress':
-        return '#9C27B0';
+        return '#FF9800'; // Orange
+      case 'in_service':
+        return '#FF9800'; // Orange
       case 'cancelled':
         return '#F44336';
       case 'no_show':
@@ -716,13 +597,16 @@ export class AppointmentService {
         return 'Scheduled';
       case 'confirmed':
         return 'Confirmed';
-      case 'pending_reschedule':
-        return 'Pending Reschedule';
+      // Legacy value; display as original status if encountered
       case 'pending':
         return 'Pending';
       case 'in_progress':
         return 'In Progress';
+      case 'in_service':
+        return 'In Service';
       case 'completed':
+        return 'Completed';
+      case 'paid':
         return 'Completed';
       case 'cancelled':
         return 'Cancelled';
@@ -731,6 +615,153 @@ export class AppointmentService {
       default:
         console.log('❌ Unknown status:', status, 'normalized:', normalizedStatus);
         return 'Unknown';
+    }
+  }
+
+  // Cancel an appointment (set status and optional reason)
+  static async cancelAppointment(appointmentId: string, options?: { reason?: string }): Promise<boolean> {
+    try {
+      console.log('🔄 Cancelling appointment:', appointmentId, 'reason:', options?.reason);
+      const apptRef = doc(db, this.COLLECTION_NAME, appointmentId);
+      await updateDoc(apptRef, {
+        status: 'cancelled',
+        cancelledAt: Timestamp.now(),
+        cancellationReason: options?.reason || ''
+      });
+      console.log('✅ Appointment cancelled:', appointmentId);
+      return true;
+    } catch (error) {
+      console.error('❌ Error cancelling appointment:', appointmentId, error);
+      return false;
+    }
+  }
+
+  // Reschedule an appointment: update date/time and add required notes. Status remains unchanged.
+  static async rescheduleAppointment(appointmentId: string, newDate: string, newTime: string, notes?: string): Promise<boolean> {
+    try {
+      console.log('🔄 Rescheduling appointment:', appointmentId, 'to', newDate, newTime);
+      const apptRef = doc(db, this.COLLECTION_NAME, appointmentId);
+      await updateDoc(apptRef, {
+        appointmentDate: newDate,
+        date: newDate,
+        appointmentTime: newTime,
+        startTime: newTime,
+        rescheduleNotes: notes || '',
+        updatedAt: Timestamp.now()
+      });
+      console.log('✅ Appointment reschedule requested:', appointmentId);
+      return true;
+    } catch (error) {
+      console.error('❌ Error rescheduling appointment:', appointmentId, error);
+      return false;
+    }
+  }
+
+  // Check if client has any active appointments (not cancelled or completed)
+  static async hasActiveAppointments(clientId: string): Promise<boolean> {
+    try {
+      console.log('🔄 Checking for active appointments for client:', clientId);
+      
+      const appointmentsRef = collection(db, this.COLLECTION_NAME);
+      const q = query(
+        appointmentsRef,
+        where('clientId', '==', clientId)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      console.log('📋 All appointments for client:', querySnapshot.size);
+      
+      // Filter out cancelled and completed appointments
+      const activeAppointments = querySnapshot.docs.filter(doc => {
+        const data = doc.data();
+        const status = data.status;
+        console.log('🔍 Appointment status:', status, 'for appointment:', doc.id);
+        
+        // Consider these as active (blocking) statuses
+        const activeStatuses = ['pending', 'confirmed', 'scheduled', 'in_progress'];
+        const isActive = activeStatuses.includes(status);
+        
+        console.log('🔍 Is active appointment?', isActive, 'Status:', status, 'Active statuses:', activeStatuses);
+        return isActive;
+      });
+      
+      // Additional check: if no appointments found at all, allow booking
+      if (querySnapshot.size === 0) {
+        console.log('📋 No appointments found for client, allowing booking');
+        return false;
+      }
+      
+      const hasActive = activeAppointments.length > 0;
+      console.log('📋 Active appointments found:', hasActive, 'Count:', activeAppointments.length);
+      console.log('📋 Active appointment statuses:', activeAppointments.map(doc => doc.data().status));
+      
+      return hasActive;
+      
+    } catch (error) {
+      console.error('❌ Error checking active appointments:', error);
+      return false; // Allow booking if check fails
+    }
+  }
+
+  // Debug function to get all appointments for a client (for testing)
+  static async getAllClientAppointments(clientId: string): Promise<any[]> {
+    try {
+      console.log('🔍 Debug: Getting all appointments for client:', clientId);
+      
+      const appointmentsRef = collection(db, this.COLLECTION_NAME);
+      const q = query(appointmentsRef, where('clientId', '==', clientId));
+      const querySnapshot = await getDocs(q);
+      
+      const appointments = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        status: doc.data().status,
+        date: doc.data().date || doc.data().appointmentDate,
+        time: doc.data().time || doc.data().appointmentTime,
+        createdAt: doc.data().createdAt
+      }));
+      
+      console.log('📋 All client appointments:', appointments);
+      return appointments;
+      
+    } catch (error) {
+      console.error('❌ Error getting client appointments:', error);
+      return [];
+    }
+  }
+
+  // Get appointments for a stylist (basic query by stylistId)
+  static async getStylistAppointments(stylistId: string): Promise<Appointment[]> {
+    try {
+      console.log('🔍 Fetching appointments for stylistId:', stylistId);
+      const appointmentsRef = collection(db, this.COLLECTION_NAME);
+      const q = query(appointmentsRef, where('stylistId', '==', stylistId), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      const appointments: Appointment[] = [];
+
+      for (const docSnapshot of snapshot.docs) {
+        try {
+          const data = docSnapshot.data() as any;
+          const appointment = await this.mapFirestoreToAppointment(data, docSnapshot.id);
+          appointments.push(appointment);
+        } catch (error) {
+          console.error('❌ Error mapping stylist appointment doc:', docSnapshot.id, error);
+        }
+      }
+
+      // Sort by date/time descending
+      appointments.sort((a, b) => {
+        const dateA = new Date(a.appointmentDate || a.date || '');
+        const dateB = new Date(b.appointmentDate || b.date || '');
+        if (dateA.getTime() !== dateB.getTime()) return dateB.getTime() - dateA.getTime();
+        const timeA = a.appointmentTime || a.startTime || '';
+        const timeB = b.appointmentTime || b.startTime || '';
+        return timeB.localeCompare(timeA);
+      });
+
+      return appointments;
+    } catch (error) {
+      console.error('❌ Error fetching stylist appointments:', error);
+      return [];
     }
   }
 }

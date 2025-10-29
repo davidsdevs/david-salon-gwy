@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,89 +7,139 @@ import {
   TouchableOpacity,
   Platform,
   Dimensions,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '../../components/ScreenWrapper';
-import useAuth from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/redux';
 import { APP_CONFIG, FONTS } from '../../constants';
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { db, COLLECTIONS } from '../../config/firebase';
 
 const { width } = Dimensions.get('window');
 const isIPhone = Platform.OS === 'ios';
 
 interface Notification {
-  id: number;
+  id: string;
   title: string;
   message: string;
-  time: string;
-  type: 'appointment' | 'promotion' | 'reward' | 'general';
-  read: boolean;
-  actionRequired?: boolean;
+  type: string;
+  isRead: boolean;
+  recipientId: string;
+  recipientRole: string;
+  appointmentId?: string;
+  appointmentDate?: string;
+  appointmentTime?: string;
+  branchName?: string;
+  clientName?: string;
+  stylistName?: string;
+  createdAt: any;
 }
 
 export default function NotificationsScreen() {
   const { user } = useAuth();
   const navigation = useNavigation();
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: 1,
-      title: 'Appointment Reminder',
-      message: 'Your hair cut appointment with Sarah Johnson is tomorrow at 2:00 PM',
-      time: '2 hours ago',
-      type: 'appointment',
-      read: false,
-      actionRequired: true,
-    },
-    {
-      id: 2,
-      title: 'New Promotion Available',
-      message: 'Get 25% off all hair coloring services this month!',
-      time: '1 day ago',
-      type: 'promotion',
-      read: false,
-    },
-    {
-      id: 3,
-      title: 'Reward Earned',
-      message: 'You earned 50 points for your recent visit. Total: 1,300 points',
-      time: '2 days ago',
-      type: 'reward',
-      read: true,
-    },
-    {
-      id: 4,
-      title: 'Welcome to David Salon',
-      message: 'Thank you for joining us! Enjoy your first visit with 15% off any service.',
-      time: '1 week ago',
-      type: 'general',
-      read: true,
-    },
-    {
-      id: 5,
-      title: 'Appointment Confirmed',
-      message: 'Your manicure appointment with Lisa Chen has been confirmed for next Friday',
-      time: '3 days ago',
-      type: 'appointment',
-      read: true,
-    },
-    {
-      id: 6,
-      title: 'Special Offer',
-      message: 'Bring a friend and both get 20% off your next service!',
-      time: '5 days ago',
-      type: 'promotion',
-      read: true,
-    },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    if (user?.id) {
+      unsubscribe = setupRealtimeSubscription();
+    } else {
+      // If logged out, clear state and stop loading
+      setNotifications([]);
+      setLoading(false);
+      setRefreshing(false);
+      setError(null);
+    }
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [user?.id]);
+
+  const setupRealtimeSubscription = () => {
+    if (!user?.id) {
+      console.log('⚠️ No user ID available for notifications subscription');
+      return;
+    }
+
+    console.log('🔄 Setting up real-time subscription for notifications');
+    
+    const notificationsRef = collection(db, COLLECTIONS.NOTIFICATIONS);
+    const q = query(
+      notificationsRef,
+      where('recipientId', '==', user.id),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      console.log('📡 Real-time update received for notifications:', querySnapshot.docs.length);
+      
+      const notificationsData: Notification[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        notificationsData.push({
+          id: doc.id,
+          title: data['title'] || data.title || 'Notification',
+          message: data['message'] || data.message || '',
+          type: data['type'] || data.type || 'general',
+          isRead: data['isRead'] ?? data.isRead ?? false,
+          recipientId: data['recipientId'] || data.recipientId || '',
+          recipientRole: data['recipientRole'] || data.recipientRole || 'client',
+          appointmentId: data['appointmentId'] || data.appointmentId || '',
+          appointmentDate: data['appointmentDate'] || data.appointmentDate || '',
+          appointmentTime: data['appointmentTime'] || data.appointmentTime || '',
+          branchName: data['branchName'] || data.branchName || '',
+          clientName: data['clientName'] || data.clientName || '',
+          stylistName: data['stylistName'] || data.stylistName || '',
+          createdAt: data['createdAt'] || data.createdAt
+        });
+      });
+      
+      setNotifications(notificationsData);
+      setLoading(false);
+      setRefreshing(false);
+    }, (error) => {
+      console.error('❌ Error in notifications subscription:', error);
+      setError('Failed to load notifications');
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  };
+
+  const onRefresh = async () => {
+    console.log('🔄 Manual refresh triggered for notifications');
+    setRefreshing(true);
+    // The real-time subscription will handle updating the notifications
+    setTimeout(() => {
+      setRefreshing(false);
+    }, 1000);
+  };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
-      case 'appointment':
+      case 'appointment_confirmed':
+      case 'appointment_reminder':
+      case 'appointment_cancelled':
+      case 'appointment_rescheduled':
         return 'calendar';
+      case 'appointment_completed':
+        return 'checkmark-circle';
       case 'promotion':
         return 'pricetag';
       case 'reward':
         return 'gift';
+      case 'welcome':
+        return 'person-add';
       default:
         return 'notifications';
     }
@@ -97,34 +147,74 @@ export default function NotificationsScreen() {
 
   const getNotificationColor = (type: string) => {
     switch (type) {
-      case 'appointment':
-        return '#4A90E2';
+      case 'appointment_confirmed':
+        return '#10B981';
+      case 'appointment_reminder':
+        return '#F59E0B';
+      case 'appointment_cancelled':
+        return '#EF4444';
+      case 'appointment_rescheduled':
+        return '#8B5CF6';
+      case 'appointment_completed':
+        return '#10B981';
       case 'promotion':
         return '#FF6B35';
       case 'reward':
         return '#8B5CF6';
+      case 'welcome':
+        return '#3B82F6';
       default:
         return '#160B53';
     }
   };
 
-  const markAsRead = (id: number) => {
-    setNotifications(prev => 
-      prev.map(notification => 
-        notification.id === id 
-          ? { ...notification, read: true }
-          : notification
-      )
-    );
+  const formatTime = (timestamp: any) => {
+    if (!timestamp) return 'Just now';
+    try {
+      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+      const now = new Date();
+      const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+      
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+      if (diffInMinutes < 10080) return `${Math.floor(diffInMinutes / 1440)}d ago`;
+      return date.toLocaleDateString();
+    } catch (error) {
+      return 'Just now';
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => 
-      prev.map(notification => ({ ...notification, read: true }))
-    );
+  const markAsRead = async (id: string) => {
+    try {
+      const notificationRef = doc(db, COLLECTIONS.NOTIFICATIONS, id);
+      await updateDoc(notificationRef, {
+        isRead: true
+      });
+      console.log('✅ Notification marked as read:', id);
+    } catch (error) {
+      console.error('❌ Error marking notification as read:', error);
+      Alert.alert('Error', 'Failed to mark notification as read');
+    }
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const markAllAsRead = async () => {
+    try {
+      const unreadNotifications = notifications.filter(n => !n.isRead);
+      const updatePromises = unreadNotifications.map(notification => {
+        const notificationRef = doc(db, COLLECTIONS.NOTIFICATIONS, notification.id);
+        return updateDoc(notificationRef, { isRead: true });
+      });
+      
+      await Promise.all(updatePromises);
+      console.log('✅ All notifications marked as read');
+    } catch (error) {
+      console.error('❌ Error marking all notifications as read:', error);
+      Alert.alert('Error', 'Failed to mark all notifications as read');
+    }
+  };
+
+  const unreadCount = notifications.filter(n => !n.isRead).length;
 
   // For web, render without ScreenWrapper to avoid duplicate headers
   if (Platform.OS === 'web') {
@@ -147,53 +237,72 @@ export default function NotificationsScreen() {
 
         {/* Notifications List */}
         <View style={styles.section}>
-          <View style={styles.notificationsContainer}>
-            {notifications.map((notification) => (
-              <TouchableOpacity
-                key={notification.id}
-                style={[
-                  styles.notificationCard,
-                  !notification.read && styles.unreadNotification
-                ]}
-                onPress={() => markAsRead(notification.id)}
-              >
-                <View style={styles.notificationLeft}>
-                  <View style={[
-                    styles.notificationIcon,
-                    { backgroundColor: getNotificationColor(notification.type) + '20' }
-                  ]}>
-                    <Ionicons 
-                      name={getNotificationIcon(notification.type) as any} 
-                      size={20} 
-                      color={getNotificationColor(notification.type)} 
-                    />
-                  </View>
-                  <View style={styles.notificationContent}>
-                    <View style={styles.notificationHeader}>
-                      <Text style={[
-                        styles.notificationTitle,
-                        !notification.read && styles.unreadText
-                      ]}>
-                        {notification.title}
-                      </Text>
-                      {!notification.read && <View style={styles.unreadDot} />}
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={APP_CONFIG.primaryColor} />
+              <Text style={styles.loadingText}>Loading notifications...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={48} color="#EF4444" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : notifications.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="notifications-outline" size={48} color="#CCCCCC" />
+              <Text style={styles.emptyText}>No notifications yet</Text>
+              <Text style={styles.emptySubtext}>You'll receive notifications about your appointments and updates here</Text>
+            </View>
+          ) : (
+            <View style={styles.notificationsContainer}>
+              {notifications.map((notification) => (
+                <TouchableOpacity
+                  key={notification.id}
+                  style={[
+                    styles.notificationCard,
+                    !notification.isRead && styles.unreadNotification
+                  ]}
+                  onPress={() => markAsRead(notification.id)}
+                >
+                  <View style={styles.notificationLeft}>
+                    <View style={[
+                      styles.notificationIcon,
+                      { backgroundColor: getNotificationColor(notification.type) + '20' }
+                    ]}>
+                      <Ionicons 
+                        name={getNotificationIcon(notification.type) as any} 
+                        size={20} 
+                        color={getNotificationColor(notification.type)} 
+                      />
                     </View>
-                    <Text style={styles.notificationMessage}>
-                      {notification.message}
-                    </Text>
-                    <Text style={styles.notificationTime}>
-                      {notification.time}
-                    </Text>
-                    {notification.actionRequired && (
-                      <View style={styles.actionRequiredBadge}>
-                        <Text style={styles.actionRequiredText}>Action Required</Text>
+                    <View style={styles.notificationContent}>
+                      <View style={styles.notificationHeader}>
+                        <Text style={[
+                          styles.notificationTitle,
+                          !notification.isRead && styles.unreadText
+                        ]}>
+                          {notification.title}
+                        </Text>
+                        {!notification.isRead && <View style={styles.unreadDot} />}
                       </View>
-                    )}
+                      <Text style={styles.notificationMessage}>
+                        {notification.message}
+                      </Text>
+                      {notification.appointmentDate && notification.appointmentTime && (
+                        <Text style={styles.appointmentDetails}>
+                          {new Date(notification.appointmentDate).toLocaleDateString()} at {notification.appointmentTime}
+                          {notification.branchName && ` • ${notification.branchName}`}
+                        </Text>
+                      )}
+                      <Text style={styles.notificationTime}>
+                        {formatTime(notification.createdAt)}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       </View>
     );
@@ -201,8 +310,14 @@ export default function NotificationsScreen() {
 
   // For mobile, use ScreenWrapper with header
   return (
-    <ScreenWrapper title="Notifications" showBackButton={true}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScreenWrapper title="Notifications" showBackButton={true} scrollable={false}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Notifications Header */}
         <View style={styles.section}>
           <View style={styles.headerContainer}>
@@ -220,53 +335,72 @@ export default function NotificationsScreen() {
 
         {/* Notifications List */}
         <View style={styles.section}>
-          <View style={styles.notificationsContainer}>
-            {notifications.map((notification) => (
-              <TouchableOpacity
-                key={notification.id}
-                style={[
-                  styles.notificationCard,
-                  !notification.read && styles.unreadNotification
-                ]}
-                onPress={() => markAsRead(notification.id)}
-              >
-                <View style={styles.notificationLeft}>
-                  <View style={[
-                    styles.notificationIcon,
-                    { backgroundColor: getNotificationColor(notification.type) + '20' }
-                  ]}>
-                    <Ionicons 
-                      name={getNotificationIcon(notification.type) as any} 
-                      size={20} 
-                      color={getNotificationColor(notification.type)} 
-                    />
-                  </View>
-                  <View style={styles.notificationContent}>
-                    <View style={styles.notificationHeader}>
-                      <Text style={[
-                        styles.notificationTitle,
-                        !notification.read && styles.unreadText
-                      ]}>
-                        {notification.title}
-                      </Text>
-                      {!notification.read && <View style={styles.unreadDot} />}
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={APP_CONFIG.primaryColor} />
+              <Text style={styles.loadingText}>Loading notifications...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={48} color="#EF4444" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : notifications.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="notifications-outline" size={48} color="#CCCCCC" />
+              <Text style={styles.emptyText}>No notifications yet</Text>
+              <Text style={styles.emptySubtext}>You'll receive notifications about your appointments and updates here</Text>
+            </View>
+          ) : (
+            <View style={styles.notificationsContainer}>
+              {notifications.map((notification) => (
+                <TouchableOpacity
+                  key={notification.id}
+                  style={[
+                    styles.notificationCard,
+                    !notification.isRead && styles.unreadNotification
+                  ]}
+                  onPress={() => markAsRead(notification.id)}
+                >
+                  <View style={styles.notificationLeft}>
+                    <View style={[
+                      styles.notificationIcon,
+                      { backgroundColor: getNotificationColor(notification.type) + '20' }
+                    ]}>
+                      <Ionicons 
+                        name={getNotificationIcon(notification.type) as any} 
+                        size={20} 
+                        color={getNotificationColor(notification.type)} 
+                      />
                     </View>
-                    <Text style={styles.notificationMessage}>
-                      {notification.message}
-                    </Text>
-                    <Text style={styles.notificationTime}>
-                      {notification.time}
-                    </Text>
-                    {notification.actionRequired && (
-                      <View style={styles.actionRequiredBadge}>
-                        <Text style={styles.actionRequiredText}>Action Required</Text>
+                    <View style={styles.notificationContent}>
+                      <View style={styles.notificationHeader}>
+                        <Text style={[
+                          styles.notificationTitle,
+                          !notification.isRead && styles.unreadText
+                        ]}>
+                          {notification.title}
+                        </Text>
+                        {!notification.isRead && <View style={styles.unreadDot} />}
                       </View>
-                    )}
+                      <Text style={styles.notificationMessage}>
+                        {notification.message}
+                      </Text>
+                      {notification.appointmentDate && notification.appointmentTime && (
+                        <Text style={styles.appointmentDetails}>
+                          {new Date(notification.appointmentDate).toLocaleDateString()} at {notification.appointmentTime}
+                          {notification.branchName && ` • ${notification.branchName}`}
+                        </Text>
+                      )}
+                      <Text style={styles.notificationTime}>
+                        {formatTime(notification.createdAt)}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       </ScrollView>
     </ScreenWrapper>
@@ -395,5 +529,56 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: Platform.OS === 'android' ? 8 : Platform.OS === 'ios' ? 9 : 10,
     fontFamily: FONTS.semiBold,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: APP_CONFIG.primaryColor,
+    fontFamily: FONTS.medium,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#EF4444',
+    fontFamily: FONTS.medium,
+    textAlign: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 18,
+    color: '#666',
+    fontFamily: FONTS.semiBold,
+  },
+  emptySubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#999',
+    fontFamily: FONTS.medium,
+    textAlign: 'center',
+  },
+  appointmentDetails: {
+    fontSize: Platform.OS === 'android' ? 11 : Platform.OS === 'ios' ? 12 : 13,
+    color: '#8B5CF6',
+    fontFamily: FONTS.medium,
+    marginTop: 4,
+    marginBottom: 4,
   },
 });

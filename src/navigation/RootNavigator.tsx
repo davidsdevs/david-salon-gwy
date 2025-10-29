@@ -7,6 +7,7 @@ import { RootStackParamList } from '../types';
 // Import screens
 import OnboardingScreen from '../screens/shared/OnboardingScreen';
 import LoginPageScreen from '../screens/shared/LoginPageScreen';
+import RegisterPageScreen from '../screens/shared/RegisterPageScreen';
 import MainTabNavigator from './client/MainTabNavigator';
 import StylistTabNavigator from './stylist/StylistTabNavigator';
 import WebNavigator from './WebNavigator';
@@ -19,6 +20,12 @@ import StylistProfileScreen from '../screens/stylist/StylistProfileScreen';
 import StylistEditProfileScreen from '../screens/stylist/StylistEditProfileScreen';
 import StylistChangePasswordScreen from '../screens/stylist/StylistChangePasswordScreen';
 import SettingsScreen from '../screens/shared/SettingsScreen';
+import ProductDetailsScreen from '../screens/client/ProductDetailsScreen';
+import AppointmentDetailsScreen from '../screens/client/AppointmentDetailsScreen';
+import TransactionDetailsScreen from '../screens/client/TransactionDetails';
+import EditProfile from '../screens/client/EditProfile';
+import TransactionHistory from '../screens/client/TransactionHistory';
+import NotificationSettings from '../screens/client/NotificationSettings';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
@@ -69,6 +76,7 @@ export default function RootNavigator({ isOnboardingComplete, isLoggedIn, userTy
       <NavigationContainer>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginPageScreen} />
+          <Stack.Screen name="Register" component={RegisterPageScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     );
@@ -92,6 +100,12 @@ export default function RootNavigator({ isOnboardingComplete, isLoggedIn, userTy
         <Stack.Screen name="StylistEditProfile" component={StylistEditProfileScreen} />
         <Stack.Screen name="StylistChangePassword" component={StylistChangePasswordScreen} />
         <Stack.Screen name="StylistClientDetails" component={StylistClientDetailsScreen} />
+        <Stack.Screen name="ProductDetails" component={ProductDetailsScreen} />
+        <Stack.Screen name="AppointmentDetails" component={AppointmentDetailsScreen} />
+        <Stack.Screen name="TransactionDetails" component={TransactionDetailsScreen} />
+        <Stack.Screen name="EditProfile" component={EditProfile} />
+        <Stack.Screen name="TransactionHistory" component={TransactionHistory} />
+        <Stack.Screen name="NotificationSettings" component={NotificationSettings} />
       </Stack.Navigator>
     </NavigationContainer>
   );

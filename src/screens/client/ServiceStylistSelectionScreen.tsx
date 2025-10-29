@@ -10,7 +10,6 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
-  FlatList,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,12 +18,16 @@ import ResponsiveLayout from '../../components/ResponsiveLayout';
 import { APP_CONFIG, FONTS } from '../../constants';
 import MobileAppointmentService, { Service, Stylist } from '../../services/mobileAppointmentService';
 import { useBooking } from '../../context/BookingContext';
+import { useServicePricing } from '../../hooks/useServicePricing';
+import { useAuth } from '../../hooks/redux';
 
 const { width } = Dimensions.get('window');
 
 export default function ServiceStylistSelectionScreen() {
   const navigation = useNavigation();
   const { state, setService, setStylist, setMultipleServices, setLoading, setError } = useBooking();
+  const { user } = useAuth();
+  const { servicePricing, calculateAppointmentTotal } = useServicePricing(state.bookingData.branchId || undefined);
   
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All Categories');
@@ -59,12 +62,23 @@ export default function ServiceStylistSelectionScreen() {
       setErrorLocal(null);
       
       console.log('🔄 Loading data for branch:', state.bookingData.branchId);
+      console.log('🔍 Booking context state:', {
+        branchId: state.bookingData.branchId,
+        branchName: state.bookingData.branchName,
+        fullState: state.bookingData
+      });
       
       // Only load services initially - stylists will be loaded when service is selected
       const servicesData = await MobileAppointmentService.getAvailableServicesByBranch(state.bookingData.branchId || '');
       
       console.log('✅ Loaded services:', servicesData.length);
       console.log('📋 Services data:', servicesData);
+      
+      if (servicesData.length === 0) {
+        console.warn('⚠️ No services found for branch:', state.bookingData.branchId);
+        setError('No services available for this branch. Please try another branch.');
+        setErrorLocal('No services available for this branch. Please try another branch.');
+      }
       
       // Debug: Check which services have isChemical property
       servicesData.forEach(service => {
@@ -252,7 +266,9 @@ export default function ServiceStylistSelectionScreen() {
 
   const getTotalPrice = () => {
     return selectedServices.reduce((total, service) => {
-      const price = typeof service.price === 'string' ? parseFloat(service.price) : service.price;
+      // Use branch-specific pricing if available, otherwise fallback to default price
+      const branchSpecificPrice = servicePricing[service.id] || service.price;
+      const price = typeof branchSpecificPrice === 'string' ? parseFloat(branchSpecificPrice) : branchSpecificPrice;
       return total + (isNaN(price) ? 0 : price);
     }, 0);
   };
@@ -265,7 +281,7 @@ export default function ServiceStylistSelectionScreen() {
   };
 
 
-  const handleNext = () => {
+  const handleNext = async () => {
     // Validation 1: Check if any services are selected
     if (selectedServices.length === 0) {
       Alert.alert(
@@ -275,6 +291,8 @@ export default function ServiceStylistSelectionScreen() {
       );
       return;
     }
+
+    // (Appointment existence check removed — restored original flow.)
 
     // Validation 2: Check if all selected services have assigned stylists
     const servicesWithoutStylists = selectedServices.filter(service => !selectedStylists[service.id]);
@@ -499,17 +517,20 @@ export default function ServiceStylistSelectionScreen() {
                 </View>
               ) : (
                 <View style={styles.servicesScrollContainer}>
-                  <ScrollView 
-                    style={styles.servicesList} 
-                    showsVerticalScrollIndicator={true}
-                    nestedScrollEnabled={true}
-                    scrollEnabled={true}
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    decelerationRate="fast"
+                    style={styles.servicesList}
+                    contentContainerStyle={[styles.servicesListContent, { paddingHorizontal: 16 }]}
                   >
                     {filteredServices.map((service) => (
                       <TouchableOpacity
                         key={service.id}
                         style={[
                           styles.serviceCard,
+                          { width: Platform.OS === 'web' ? 360 : Math.round(width - 80) },
                           selectedServices.some(s => s.id === service.id) && styles.selectedServiceCard
                         ]}
                         onPress={() => {
@@ -528,7 +549,7 @@ export default function ServiceStylistSelectionScreen() {
                             </View>
                             <View style={styles.priceContainer}>
                               <Text style={styles.priceEstimate}>Starting from</Text>
-                              <Text style={styles.servicePrice}>₱{service.price}</Text>
+                              <Text style={styles.servicePrice}>₱{servicePricing[service.id] || service.price}</Text>
                             </View>
                           </View>
                         </View>
@@ -548,7 +569,12 @@ export default function ServiceStylistSelectionScreen() {
               <Text style={styles.containerTitle}>Stylist Assignment</Text>
               
               {selectedServices.length > 0 ? (
-                <ScrollView style={styles.stylistsList} showsVerticalScrollIndicator={false}>
+                <ScrollView 
+                  style={styles.stylistsList} 
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                  contentContainerStyle={styles.stylistsListContent}
+                >
                   {selectedServices.map((service) => (
                     <View key={service.id} style={styles.stylistAssignmentCard}>
                       <Text style={styles.serviceTitle}>{service.name}</Text>
@@ -739,8 +765,9 @@ export default function ServiceStylistSelectionScreen() {
 
   // For mobile, use ScreenWrapper with header
   return (
-    <ScreenWrapper title="Book Appointment">
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScreenWrapper title="Book Appointment" scrollable={false}>
+      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+        <View style={styles.container}>
         {/* Progress Indicator */}
         <View style={styles.progressContainer}>
           <View style={styles.progressStep}>
@@ -820,11 +847,11 @@ export default function ServiceStylistSelectionScreen() {
                 </View>
               ) : (
                 <View style={styles.servicesScrollContainer}>
-                  <ScrollView 
-                    style={styles.servicesList} 
+                  <ScrollView
                     showsVerticalScrollIndicator={true}
                     nestedScrollEnabled={true}
-                    scrollEnabled={true}
+                    style={styles.servicesList}
+                    contentContainerStyle={styles.servicesListContent}
                   >
                     {filteredServices.map((service) => (
                       <TouchableOpacity
@@ -849,7 +876,7 @@ export default function ServiceStylistSelectionScreen() {
                             </View>
                             <View style={styles.priceContainer}>
                               <Text style={styles.priceEstimate}>Starting from</Text>
-                              <Text style={styles.servicePrice}>₱{service.price}</Text>
+                              <Text style={styles.servicePrice}>₱{servicePricing[service.id] || service.price}</Text>
                             </View>
                           </View>
                         </View>
@@ -869,7 +896,12 @@ export default function ServiceStylistSelectionScreen() {
               <Text style={styles.containerTitle}>Stylist Assignment</Text>
               
               {selectedServices.length > 0 ? (
-                <ScrollView style={styles.stylistsList} showsVerticalScrollIndicator={false}>
+                <ScrollView 
+                  style={styles.stylistsList} 
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                  contentContainerStyle={styles.stylistsListContent}
+                >
                   {selectedServices.map((service) => (
                     <View key={service.id} style={styles.stylistAssignmentCard}>
                       <Text style={styles.serviceTitle}>{service.name}</Text>
@@ -973,7 +1005,7 @@ export default function ServiceStylistSelectionScreen() {
             <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
-      </ScrollView>
+  </View>
 
       {/* Category Selection Modal */}
       {showCategoryModal && (
@@ -1054,11 +1086,15 @@ export default function ServiceStylistSelectionScreen() {
           </View>
         </View>
       )}
+      </ScrollView>
     </ScreenWrapper>
   );
 }
 
 const styles = StyleSheet.create({
+  scrollContainer: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
@@ -1159,6 +1195,8 @@ const styles = StyleSheet.create({
     shadowOpacity: Platform.OS === 'web' ? 0.25 : 0.1,
     shadowRadius: Platform.OS === 'web' ? 15 : 8,
     elevation: Platform.OS === 'web' ? 0 : 3,
+    minHeight: 400,
+    maxHeight: 600,
   },
   servicesHeader: {
     flexDirection: 'row',
@@ -1286,7 +1324,12 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   stylistsList: {
-    maxHeight: 400,
+    flex: 1,
+    maxHeight: 500,
+  },
+  stylistsListContent: {
+    paddingBottom: 20,
+    paddingRight: 4, // Add some padding for the scrollbar
   },
   stylistAssignmentCard: {
     marginBottom: 16,

@@ -1,5 +1,7 @@
+console.log('ENV TEST KEY:', process.env['EXPO_PUBLIC_FIREBASE_API_KEY']);
+
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { initializeAuth, getAuth, Auth, getReactNativePersistence } from 'firebase/auth';
+import { initializeAuth, getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,13 +9,13 @@ import { getConfig } from './production';
 
 // Firebase config from environment variables
 const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY || '',
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || '',
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '',
-  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID || '',
+  apiKey: process.env['EXPO_PUBLIC_FIREBASE_API_KEY'] || '',
+  authDomain: process.env['EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN'] || '',
+  projectId: process.env['EXPO_PUBLIC_FIREBASE_PROJECT_ID'] || '',
+  storageBucket: process.env['EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET'] || '',
+  messagingSenderId: process.env['EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'] || '',
+  appId: process.env['EXPO_PUBLIC_FIREBASE_APP_ID'] || '',
+  measurementId: process.env['EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID'] || '',
 };
 
 // Initialize Firebase
@@ -25,13 +27,13 @@ if (getApps().length === 0) {
 }
 
 // Initialize Firebase Auth with AsyncStorage persistence
+// Initialize auth (avoid react-native persistence helper here to keep compatibility)
 let auth: Auth;
 try {
-  auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage),
-  });
+  // Try to initialize auth; if it fails assume already initialized and use existing instance
+  auth = initializeAuth ? initializeAuth(app) as Auth : getAuth(app);
 } catch (error) {
-  console.warn('Firebase Auth already initialized, using existing instance');
+  console.warn('Firebase Auth initialization fallback to getAuth due to:', error);
   auth = getAuth(app);
 }
 
