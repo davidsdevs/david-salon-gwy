@@ -9,7 +9,6 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@emailjs/react-native": "^5.1.0",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -28,7 +27,6 @@
     "expo-status-bar": "~3.0.8",
     "express": "^5.1.0",
     "firebase": "^12.3.0",
-    "nodemailer": "^7.0.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.4",
